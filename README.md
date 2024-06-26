@@ -1,4 +1,4 @@
-JPEG Decoder
+# JPEG Decoder
 Decodes JPEG images that use Baseline Discrete Cosine Transform (DCT).
 
 Currently a work in progress:
