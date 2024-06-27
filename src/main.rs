@@ -87,7 +87,7 @@ impl Markers {
 struct Frame {
     pub frame_header: FrameHeader,
     pub scans: Vec<Scan>,
-    pub dnl_segment: Option<NumberOfLines>,
+    pub lines: Option<NumberOfLines>,
     pub quantization_tables: Vec<QuantizationTable>,
     pub huffman_tables: Vec<HuffmanTable>,
     pub arithmetic_tables: Vec<ArithmeticTable>,
@@ -373,6 +373,17 @@ struct NumberOfLines {
     pub total_lines: u16 // NL
 }
 
+impl NumberOfLines {
+    fn build(&mut self, data: &Vec<u8>) {
+        if data.len() != 4 {
+            // check adds safety for length assignment
+            panic!("(NumberOfLines::build) (DNL) Byte data not a length of 4"); 
+        }
+        self.length = u16::from_be_bytes([data[0],data[1]]);
+        self.total_lines = u16::from_be_bytes([data[2],data[3]]);
+    }
+}
+
 #[derive(Default, Debug)]
 struct HierarchicalProgression {
     pub length: u16,                 // Lf
@@ -549,6 +560,11 @@ fn main() {
                             else if current_marker_bytes[1] == Some(Markers::DAC) {
                                 frame.arithmetic_tables.push(ArithmeticTable::default());
                                 frame.arithmetic_tables.last_mut().unwrap().build(&segment_data);
+                            }
+                            else if current_marker_bytes[1] == Some(Markers::DNL) {
+                                let mut number_of_lines = NumberOfLines::default();
+                                number_of_lines.build(&segment_data);
+                                frame.lines = Some(number_of_lines);
                             }
 
                             // Restart the process
