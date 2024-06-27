@@ -372,6 +372,20 @@ struct Comment {
     pub comment_bytes: Vec<u8> // Cmi
 }
 
+impl Comment {
+    fn build(&mut self, data: &Vec<u8>) {
+        if data.len() < 2 {
+            // check adds safety for length assignment
+            panic!("(Comment::build) (COM) Not enough byte data"); 
+        }
+        self.length = u16::from_be_bytes([data[0],data[1]]);
+        if usize::from(self.length) != data.len() {
+            panic!("(Comment::build) (COM) Byte data length does not correspond to length parameter");
+        }
+        self.comment_bytes = data[2..].to_vec();
+    }
+}
+
 #[derive(Default, Debug)]
 struct ApplicationData {
     pub length: u16,              // Lp
@@ -581,6 +595,10 @@ fn main() {
                                 let mut restart_interval = RestartInterval::default();
                                 restart_interval.build(&segment_data);
                                 frame.restart_interval = Some(restart_interval);
+                            }
+                            else if current_marker_bytes[1] == Some(Markers::COM) {
+                                frame.comments.push(Comment::default());
+                                frame.comments.last_mut().unwrap().build(&segment_data);
                             }
 
                             // Restart the process
