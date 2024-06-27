@@ -355,6 +355,17 @@ struct RestartInterval {
     pub restart_interval: u16 // Ri
 }
 
+impl RestartInterval {
+    fn build(&mut self, data: &Vec<u8>) {
+        if data.len() != 4 {
+            // check adds safety for length assignment
+            panic!("(RestartInterval::build) (DRI) Byte data not a length of 4"); 
+        }
+        self.length = u16::from_be_bytes([data[0],data[1]]);
+        self.restart_interval = u16::from_be_bytes([data[2],data[3]]);
+    }
+}
+
 #[derive(Default, Debug)]
 struct Comment {
     pub length: u16,           // Lc
@@ -565,6 +576,11 @@ fn main() {
                                 let mut number_of_lines = NumberOfLines::default();
                                 number_of_lines.build(&segment_data);
                                 frame.lines = Some(number_of_lines);
+                            }
+                            else if current_marker_bytes[1] == Some(Markers::DRI) {
+                                let mut restart_interval = RestartInterval::default();
+                                restart_interval.build(&segment_data);
+                                frame.restart_interval = Some(restart_interval);
                             }
 
                             // Restart the process
