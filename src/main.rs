@@ -215,16 +215,14 @@ impl ScanHeader {
         // Each component is 2 bytes and there are 6 bytes of parameters.
         let component_length: usize = (self.total_components * 2).into();
         if component_length + 6 != self.length.into() {
-            panic!("(ScanHeader::build) (SOS) Total components parameter does not correspond to length parameter. Component Byte Length: {} | Length: {}", component_byte_length + 6, self.length);
+            panic!("(ScanHeader::build) (SOS) Total components parameter does not correspond to length parameter. Component Byte Length: {} | Length: {}", component_length + 6, self.length);
         }
         // Each component is 2 bytes
         let component_chunks = data[3..component_length+3].chunks(2);
         for component_bytes in component_chunks.into_iter() {
-            let mut scan_component = ScanComponent::default();
-            let mut component_data = component_bytes.iter();
-            scan_component.component_selector = *component_data.next().unwrap();
-            scan_component.entropy_table_dest(component_data.next().unwrap());
-            self.components.push(scan_component);
+            let mut component = ScanComponent::default();
+            component.build(&component_bytes.to_vec());
+            self.components.push(component);
         }
         self.spectral_selection_start = data[4 + component_length];
         self.spectral_selection_end = data[5 + component_length];
@@ -243,6 +241,13 @@ impl ScanComponent {
     fn entropy_table_dest(&mut self, byte: &u8) {
         self.dc_entropy_table_dest = byte >> 4;
         self.ac_entropy_table_dest = (byte << 4) >> 4;
+    }
+    fn build(&mut self, data: &Vec<u8>) {
+        if data.len() != 2 {
+            panic!("(ScanComponent::build) Byte data not a length of 2.");
+        }
+        self.component_selector = data[0];
+        self.entropy_table_dest(&data[1]);
     }
 }
 
