@@ -334,6 +334,19 @@ impl ArithmeticTable {
         self.class = byte >> 4;
         self.destination_id = (byte << 4) >> 4;
     }
+
+    fn build (&mut self, data: &Vec<u8>) {
+        if data.len() < 2 {
+            // check adds safety for length assignment
+            panic!("(ArithmeticTable::build) (DAC) Not enough byte data"); 
+        }
+        self.length = u16::from_be_bytes([data[0],data[1]]);
+        if usize::from(self.length) != data.len() {
+            panic!("(ArithmeticTable::build) (DAC) Byte data length does not correspond to length parameter");
+        }
+        self.class_and_destination_id(&data[2]);
+        self.value = data[3];
+    }
 }
 
 #[derive(Default, Debug)]
@@ -532,6 +545,10 @@ fn main() {
                                 let mut exp = ExpandReference::default();
                                 exp.build(&segment_data);
                                 frame.expand_reference = Some(exp);
+                            }
+                            else if current_marker_bytes[1] == Some(Markers::DAC) {
+                                frame.arithmetic_tables.push(ArithmeticTable::default());
+                                frame.arithmetic_tables.last_mut().unwrap().build(&segment_data);
                             }
 
                             // Restart the process
