@@ -213,22 +213,22 @@ impl ScanHeader {
         self.total_components = data[2];
         // Ensure the length matches the total_components
         // Each component is 2 bytes and there are 6 bytes of parameters.
-        let component_byte_length: usize = (self.total_components * 2).into();
-        if component_byte_length + 6 != self.length.into() {
+        let component_length: usize = (self.total_components * 2).into();
+        if component_length + 6 != self.length.into() {
             panic!("(ScanHeader::build) (SOS) Total components parameter does not correspond to length parameter. Component Byte Length: {} | Length: {}", component_byte_length + 6, self.length);
         }
         // Each component is 2 bytes
-        let component_byte_chunks = data[3..component_byte_length+3].chunks(2);
-        for component_bytes in component_byte_chunks.into_iter() {
+        let component_chunks = data[3..component_length+3].chunks(2);
+        for component_bytes in component_chunks.into_iter() {
             let mut scan_component = ScanComponent::default();
             let mut component_data = component_bytes.iter();
             scan_component.component_selector = *component_data.next().unwrap();
             scan_component.entropy_table_dest(component_data.next().unwrap());
             self.components.push(scan_component);
         }
-        self.spectral_selection_start = data[4 + component_byte_length];
-        self.spectral_selection_end = data[5 + component_byte_length];
-        self.successive_approximation(&data[5 + component_byte_length]);
+        self.spectral_selection_start = data[4 + component_length];
+        self.spectral_selection_end = data[5 + component_length];
+        self.successive_approximation(&data[5 + component_length]);
     }
 }
 
