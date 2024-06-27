@@ -388,8 +388,24 @@ impl Comment {
 
 #[derive(Default, Debug)]
 struct ApplicationData {
+    pub marker: u8,
     pub length: u16,              // Lp
     pub application_data: Vec<u8> // Api
+}
+
+impl ApplicationData {
+    fn build(&mut self, marker: &u8, data: &Vec<u8>) {
+        if data.len() < 2 {
+            // check adds safety for length assignment
+            panic!("(ApplicationData::build) (APP) Not enough byte data"); 
+        }
+        self.length = u16::from_be_bytes([data[0],data[1]]);
+        if usize::from(self.length) != data.len() {
+            panic!("(ApplicationData::build) (APP) Byte data length does not correspond to length parameter");
+        }
+        self.marker = *marker;
+        self.application_data = data[2..].to_vec();
+    }
 }
 
 #[derive(Default, Debug)]
@@ -599,6 +615,12 @@ fn main() {
                             else if current_marker_bytes[1] == Some(Markers::COM) {
                                 frame.comments.push(Comment::default());
                                 frame.comments.last_mut().unwrap().build(&segment_data);
+                            }
+                            else if current_marker_bytes[1] >= Some(Markers::APP0) 
+                            && current_marker_bytes[1] <= Some(Markers::APP15) {
+                                let mut app_data = ApplicationData::default();
+                                app_data.build(&current_marker_bytes[1].unwrap(), &segment_data);
+                                frame.application_data.push(app_data);
                             }
 
                             // Restart the process
