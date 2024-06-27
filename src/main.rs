@@ -269,7 +269,7 @@ struct HuffmanTable {
     pub length: u16,                               // Lh
     pub class: u8,                                 // Tc
     pub destination_id: u8,                        // Th
-    // Li; inferred by length of outer vector in huffman_codes
+    // Li; inferred by length of inner vector in huffman_codes
     pub huffman_codes: Vec<Vec<u8>>                //Vij; HUFFVAL; 1 >= i <= 16, 0 >= j <= 255 
 }
 
@@ -365,6 +365,17 @@ impl ExpandReference {
     fn expand_horizontally_and_vertically(&mut self, byte: &u8) {
         self.expand_horizontally = byte >> 4;
         self.expand_vertically = (byte << 4) >> 4;
+    }
+    fn build(&mut self, data: &Vec<u8>) {
+        if data.len() < 2 {
+            // check adds safety for length assignment
+            panic!("(ExpandReference::build) (EXP) Not enough byte data"); 
+        }
+        self.length = u16::from_be_bytes([data[0],data[1]]);
+        if usize::from(self.length) != data.len() {
+            panic!("(ExpandReference::build) (EXP) Byte data length does not correspond to length parameter");
+        }
+        self.expand_horizontally_and_vertically(&data[2]);
     }
 }
 
@@ -500,6 +511,11 @@ fn main() {
                             else if current_marker_bytes[1] == Some(Markers::DHT) {
                                 frame.huffman_tables.push(HuffmanTable::default());
                                 frame.huffman_tables.last_mut().unwrap().build(&segment_data);
+                            }
+                            else if current_marker_bytes[1] == Some(Markers::EXP) {
+                                let mut exp = ExpandReference::default();
+                                exp.build(&segment_data);
+                                frame.expand_reference = Some(exp);
                             }
 
                             // Restart the process
