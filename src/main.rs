@@ -123,6 +123,17 @@ impl FrameHeader {
         self.total_vertical_lines = u16::from_be_bytes([data[3],data[4]]);
         self.total_horizontal_lines = u16::from_be_bytes([data[5],data[6]]);
         self.total_components = data[7];
+        
+        let component_length: usize = (self.total_components * 3).into();
+        // Each component is 3 bytes
+        let component_chunks = data[8..component_length+8].chunks(3);
+        for component_bytes in component_chunks.into_iter() {
+            let mut component = FrameComponent::default();
+            component.build(&component_bytes.to_vec());
+            self.components.push(component);
+        }
+
+
         let component_iter = data.iter().nth(8).into_iter();
         let mut component_data: Vec<u8> = Vec::new();
         for byte in component_iter {
