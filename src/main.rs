@@ -495,8 +495,8 @@ fn main() {
                 //
                 // Each segment and its purpose within the JPEG is defined in
                 // the spec: https://www.w3.org/Graphics/JPEG/itu-t81.pdf
-                println!("(Stage) {:?}", stage);
-                println!("Current byte: {:02x?}", *byte);
+                //println!("(Stage) {:?}", stage);
+                //println!("Current byte: {:02x?}", *byte);
                 match stage {
                     ReadStage::Marker => {
                         if current_marker_bytes[0].is_none() {
@@ -528,7 +528,6 @@ fn main() {
                                     // value.
                                     let current_scan = frame.scans.last_mut().unwrap();
                                     current_scan.entropy_coded_segments.push(Markers::MRK);
-                                    current_scan.entropy_coded_segments.push(Markers::ESC);
                                     stage = ReadStage::Scan;
                                 },
                                 _ => stage = ReadStage::Length,
@@ -647,4 +646,10 @@ fn main() {
             println!("{:#?}", frame);
         }
     }
+
+    // Decode
+    // First, decode the zig-zag sequence of quantized DCT coefficients.
+    
+    // Need a ScanComponent's dc_entropy_table_dest value and a HuffmanTable 
+    // with a class == 0 and destination_id == dc_entropy_table_dest
 }
