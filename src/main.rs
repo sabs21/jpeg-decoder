@@ -99,7 +99,7 @@ struct Frame {
 
 #[derive(Default, Debug)]
 struct FrameHeader {
-    pub marker: u8,                  // SOF, determines algorithm to decode file
+    pub marker: u8,                  // SOF or DHP, determines algorithm to decode file
     pub length: u16,                 // Lf
     pub precision: u8,               // P
     pub total_vertical_lines: u16,   // Y
@@ -426,16 +426,6 @@ impl NumberOfLines {
 }
 
 #[derive(Default, Debug)]
-struct HierarchicalProgression {
-    pub length: u16,                 // Lf
-    pub precision: u8,               // P
-    pub total_vertical_lines: u16,   // Y
-    pub total_horizontal_lines: u16, // X
-    pub total_components: u8,        // Nf
-    pub components: Vec<FrameComponent>
-}
-
-#[derive(Default, Debug)]
 struct ExpandReference {
     pub length: u16,             // Le
     pub expand_horizontally: u8, // Eh
@@ -576,7 +566,8 @@ fn main() {
                             || (current_marker_bytes[1] >= Some(Markers::SOF9) 
                             && current_marker_bytes[1] <= Some(Markers::SOF11))
                             || (current_marker_bytes[1] >= Some(Markers::SOF13) 
-                            && current_marker_bytes[1] <= Some(Markers::SOF15)) {
+                            && current_marker_bytes[1] <= Some(Markers::SOF15))
+                            || current_marker_bytes[1] == Some(Markers::DHP) {
                                 frame.frame_header.build(&current_marker_bytes[1].unwrap(), &segment_data);
                             }
                             else if current_marker_bytes[1] == Some(Markers::SOS) {
