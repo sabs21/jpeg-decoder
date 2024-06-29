@@ -286,13 +286,24 @@ struct HuffmanTable {
     pub class: u8,                                 // Tc
     pub destination_id: u8,                        // Th
     // Li; inferred by length of inner vector in huffman_codes
-    pub huffman_codes: Vec<Vec<u8>>                //Vij; HUFFVAL; 1 >= i <= 16, 0 >= j <= 255 
+    pub huffman_values: Vec<Vec<u8>>,              //Vij; HUFFVAL; 1 >= i <= 16, 0 >= j <= 255 
+    pub huffman_size: Vec<u8>
 }
 
 impl HuffmanTable {
     fn class_and_destination_id(&mut self, byte: &u8) {
         self.class = byte >> 4;
         self.destination_id = (byte << 4) >> 4;
+    }
+
+    fn generate_size_table(&mut self) {
+        // The output table is referred to as HUFFSIZE in the spec
+        for (code_len, values) in self.huffman_values.iter().enumerate() {
+            let len: u8 = (code_len + 1).try_into().unwrap();
+            for _ in 0..values.len() {
+                self.huffman_size.push(len);
+            }
+        }
     }
 
     fn build(&mut self, data: &Vec<u8>) {
@@ -308,15 +319,15 @@ impl HuffmanTable {
         
         // Put all huffman codes into huffman_codes vector matrix.
         // Two pointers:
-        //   data[3..18]: each of the 16 totals per huffman code length
+        //   data[3..19]: each of the 16 totals per huffman code length
         //   codes_iter:  each huffman code  
         let mut codes_iter = data[19..].iter();
-        for byte in data[3..18].iter() {
+        for byte in data[3..19].iter() {
             let mut codes = Vec::new();
             for _ in 0..usize::from(*byte) {
                 codes.push(*codes_iter.next().unwrap());
             }
-            self.huffman_codes.push(codes);
+            self.huffman_values.push(codes);
         }
     }
 }
@@ -551,8 +562,8 @@ fn main() {
                         }
                     },
                     ReadStage::Segment => {
-                        println!("Segment Data Length: {}", segment_data.len());
-                        println!("Segment Length: {}", segment_length);
+                        //println!("Segment Data Length: {}", segment_data.len());
+                        //println!("Segment Length: {}", segment_length);
                         
                         segment_data.push(*byte);
                         if segment_data.len() == segment_length.into() {
@@ -643,6 +654,9 @@ fn main() {
                     }
                 }
             }
+            for table in frame.huffman_tables.iter_mut() {
+                table.generate_size_table();
+            }
             println!("{:#?}", frame);
         }
     }
@@ -653,3 +667,5 @@ fn main() {
     // Need a ScanComponent's dc_entropy_table_dest value and a HuffmanTable 
     // with a class == 0 and destination_id == dc_entropy_table_dest
 }
+
+
