@@ -287,14 +287,11 @@ struct HuffmanEntry {
 
 #[derive(Default, Debug)]
 struct HuffmanTable {
-    //pub marker: u8,
-    pub length: u16,                               // Lh
-    pub class: u8,                                 // Tc
-    pub destination_id: u8,                        // Th
-    // Li; inferred by length of inner vector in huffman_codes
-    pub huffman_size_lengths: Vec<u8>,
-    pub huffman_values: Vec<u8>,              //Vij; HUFFVAL; 1 >= i <= 16, 0 >= j <= 255 
-    pub huffman_codes: Vec<u16>,
+    pub length: u16,                   // Lh
+    pub class: u8,                     // Tc
+    pub destination_id: u8,            // Th
+    pub huffman_size_lengths: Vec<u8>, // Li; 1 >= i <= 16
+    pub huffman_values: Vec<u8>,       //Vij; HUFFVAL; 0 >= j <= 255 
     pub table: std::collections::HashMap<u8, HuffmanEntry> // u8 == huffman_value
 }
 
@@ -688,22 +685,6 @@ fn main() {
                 }
             }
             for table in frame.huffman_tables.iter_mut() {
-                /*println!("Sizes");
-                let sizes: Vec<u8> = table.generate_size_table();
-                for size in sizes.iter() {
-                    println!("{}", size);
-                }
-                println!("Codes");
-                let codes: Vec<u16> = table.generate_code_table(&sizes);
-                for code in codes.iter() {
-                    println!("{:16b}", code);
-                }
-                println!("Table");*/
-                //println!("[");
-                //for code in table.huffman_codes.iter() {
-                //    println!("{:16b}", code);
-                //}
-                //println!("]");
                 println!("{:#?}", table);
             }
             //println!("{:#?}", frame);
@@ -716,5 +697,4 @@ fn main() {
     // Need a ScanComponent's dc_entropy_table_dest value and a HuffmanTable 
     // with a class == 0 and destination_id == dc_entropy_table_dest
 }
-
 
