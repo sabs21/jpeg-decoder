@@ -287,7 +287,7 @@ struct HuffmanTable {
     pub destination_id: u8,                        // Th
     // Li; inferred by length of inner vector in huffman_codes
     pub huffman_values: Vec<Vec<u8>>,              //Vij; HUFFVAL; 1 >= i <= 16, 0 >= j <= 255 
-    pub huffman_size: Vec<u8>
+    pub huffman_codes: Vec<u16>
 }
 
 impl HuffmanTable {
@@ -296,14 +296,18 @@ impl HuffmanTable {
         self.destination_id = (byte << 4) >> 4;
     }
 
-    fn generate_size_table(&mut self) {
-        // The output table is referred to as HUFFSIZE in the spec
-        for (code_len, values) in self.huffman_values.iter().enumerate() {
-            let len: u8 = (code_len + 1).try_into().unwrap();
+    fn generate_code_table(&mut self) {
+        // The output table is referred to as HUFFCODE in the spec
+        // We don't need HUFFSIZE here since the length of each huffman_values
+        // vector tells us the amount of codes per length already.
+        let mut code: u16 = 0;
+        for values in self.huffman_values.iter() {
+            code = code << 1;
             for _ in 0..values.len() {
-                self.huffman_size.push(len);
+                self.huffman_codes.push(code);
+                code += 1;
             }
-        }
+        } 
     }
 
     fn build(&mut self, data: &Vec<u8>) {
@@ -317,7 +321,7 @@ impl HuffmanTable {
         }
         self.class_and_destination_id(&data[2]);
         
-        // Put all huffman codes into huffman_codes vector matrix.
+        // Put all huffman codes into huffman_values vector matrix.
         // Two pointers:
         //   data[3..19]: each of the 16 totals per huffman code length
         //   codes_iter:  each huffman code  
@@ -655,9 +659,15 @@ fn main() {
                 }
             }
             for table in frame.huffman_tables.iter_mut() {
-                table.generate_size_table();
+                table.generate_code_table();
+                println!("[");
+                for code in table.huffman_codes.iter() {
+                    println!("{:16b}", code);
+                }
+                println!("]");
+                println!("{:#?}", table);
             }
-            println!("{:#?}", frame);
+            //println!("{:#?}", frame);
         }
     }
 
