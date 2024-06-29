@@ -280,14 +280,22 @@ impl QuantizationTable {
 }
 
 #[derive(Default, Debug)]
+struct HuffmanEntry {
+    pub code: u16,
+    pub size: u8
+}
+
+#[derive(Default, Debug)]
 struct HuffmanTable {
     //pub marker: u8,
     pub length: u16,                               // Lh
     pub class: u8,                                 // Tc
     pub destination_id: u8,                        // Th
     // Li; inferred by length of inner vector in huffman_codes
-    pub huffman_values: Vec<Vec<u8>>,              //Vij; HUFFVAL; 1 >= i <= 16, 0 >= j <= 255 
-    pub huffman_codes: Vec<u16>
+    pub huffman_size_lengths: Vec<u8>,
+    pub huffman_values: Vec<u8>,              //Vij; HUFFVAL; 1 >= i <= 16, 0 >= j <= 255 
+    pub huffman_codes: Vec<u16>,
+    pub table: std::collections::HashMap<u8, HuffmanEntry> // u8 == huffman_value
 }
 
 impl HuffmanTable {
@@ -296,18 +304,31 @@ impl HuffmanTable {
         self.destination_id = (byte << 4) >> 4;
     }
 
-    fn generate_code_table(&mut self) {
-        // The output table is referred to as HUFFCODE in the spec
-        // We don't need HUFFSIZE here since the length of each huffman_values
-        // vector tells us the amount of codes per length already.
-        let mut code: u16 = 0;
-        for values in self.huffman_values.iter() {
-            code = code << 1;
-            for _ in 0..values.len() {
-                self.huffman_codes.push(code);
-                code += 1;
+    // The output table is referred to as HUFFSIZE in the spec
+    fn generate_size_table(& self) -> Vec<u8> {
+        let mut huffman_sizes: Vec<u8> = Vec::new();
+        for (size, size_len) in self.huffman_size_lengths.iter().enumerate() {
+            for _ in 0..*size_len {
+                huffman_sizes.push((size + 1).try_into().unwrap());
             }
-        } 
+        }
+        return huffman_sizes
+    }
+
+    // The output table is referred to as HUFFCODE in the spec
+    fn generate_code_table(& self, huffman_sizes: &Vec<u8>) -> Vec<u16> {
+        let mut huffman_codes: Vec<u16> = Vec::new();
+        let mut code: u16 = 0;
+        let mut prev_size: u8 = *huffman_sizes.first().unwrap();
+        for size in huffman_sizes.iter() {
+            while size != &prev_size {
+                code = code << 1;
+                prev_size += 1;
+            }
+            huffman_codes.push(code);
+            code += 1;
+        }
+        return huffman_codes
     }
 
     fn build(&mut self, data: &Vec<u8>) {
@@ -321,18 +342,11 @@ impl HuffmanTable {
         }
         self.class_and_destination_id(&data[2]);
         
-        // Put all huffman codes into huffman_values vector matrix.
-        // Two pointers:
-        //   data[3..19]: each of the 16 totals per huffman code length
-        //   codes_iter:  each huffman code  
-        let mut codes_iter = data[19..].iter();
-        for byte in data[3..19].iter() {
-            let mut codes = Vec::new();
-            for _ in 0..usize::from(*byte) {
-                codes.push(*codes_iter.next().unwrap());
-            }
-            self.huffman_values.push(codes);
-        }
+        // Put all huffman size lengths into huffman_size_lengths vector
+        self.huffman_size_lengths = data[3..19].to_vec();
+
+        // Put all huffman values into huffman_values vector
+        self.huffman_values = data[19..].to_vec();
     }
 }
 
@@ -659,12 +673,22 @@ fn main() {
                 }
             }
             for table in frame.huffman_tables.iter_mut() {
-                table.generate_code_table();
-                println!("[");
-                for code in table.huffman_codes.iter() {
+                println!("Sizes");
+                let sizes: Vec<u8> = table.generate_size_table();
+                for size in sizes.iter() {
+                    println!("{}", size);
+                }
+                println!("Codes");
+                let codes: Vec<u16> = table.generate_code_table(&sizes);
+                for code in codes.iter() {
                     println!("{:16b}", code);
                 }
-                println!("]");
+                println!("Table");
+                //println!("[");
+                //for code in table.huffman_codes.iter() {
+                //    println!("{:16b}", code);
+                //}
+                //println!("]");
                 println!("{:#?}", table);
             }
             //println!("{:#?}", frame);
