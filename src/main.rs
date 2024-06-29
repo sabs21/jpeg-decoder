@@ -331,6 +331,16 @@ impl HuffmanTable {
         return huffman_codes
     }
 
+    fn build_table(&mut self, huffman_sizes: &Vec<u8>, huffman_codes: &Vec<u16>) {
+        // Maps each symbol (aka a value) to a huffman size and code
+        for (idx, symbol) in self.huffman_values.iter().enumerate() {
+            self.table.insert(*symbol, HuffmanEntry {
+                code: huffman_codes[idx],
+                size: huffman_sizes[idx]
+            });
+        }
+    }
+
     fn build(&mut self, data: &Vec<u8>) {
         if data.len() < 2 {
             // check adds safety for length assignment
@@ -347,6 +357,11 @@ impl HuffmanTable {
 
         // Put all huffman values into huffman_values vector
         self.huffman_values = data[19..].to_vec();
+
+        // Decode the huffman table
+        let sizes: Vec<u8> =  self.generate_size_table();
+        let codes: Vec<u16> = self.generate_code_table(&sizes);
+        self.build_table(&sizes, &codes);
     }
 }
 
@@ -673,7 +688,7 @@ fn main() {
                 }
             }
             for table in frame.huffman_tables.iter_mut() {
-                println!("Sizes");
+                /*println!("Sizes");
                 let sizes: Vec<u8> = table.generate_size_table();
                 for size in sizes.iter() {
                     println!("{}", size);
@@ -683,7 +698,7 @@ fn main() {
                 for code in codes.iter() {
                     println!("{:16b}", code);
                 }
-                println!("Table");
+                println!("Table");*/
                 //println!("[");
                 //for code in table.huffman_codes.iter() {
                 //    println!("{:16b}", code);
