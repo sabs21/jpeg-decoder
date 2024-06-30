@@ -322,7 +322,7 @@ impl HuffmanTable {
                 code = code << 1;
                 prev_size += 1;
             }
-            huffman_codes.push(code);
+            huffman_codes.push(code << (16 - size));
             code += 1;
         }
         return huffman_codes
@@ -684,8 +684,11 @@ fn main() {
                     }
                 }
             }
-            for table in frame.huffman_tables.iter_mut() {
-                println!("{:#?}", table);
+            for huffman_table in frame.huffman_tables.iter_mut() {
+                println!("{:#?}", huffman_table);
+                for (value, entry) in huffman_table.table.iter() {
+                    println!("Value: {:8b} | Size: {} | Code: {:16b}", value, entry.size, entry.code);
+                }
             }
             //println!("{:#?}", frame);
         }
