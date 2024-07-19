@@ -146,7 +146,7 @@ impl FrameHeader {
 
 #[derive(Default, Debug)]
 struct FrameComponent {
-    pub bit_stream: u8,                 // Ci
+    pub id: u8,                         // Ci
     pub horizontal_sample_factor: u8,   // Hi
     pub vertical_sample_factor: u8,     // Vi
     pub quantization_table_selector: u8 // Tqi
@@ -164,7 +164,7 @@ impl FrameComponent {
         if data.len() != 3 {
             panic!("(FrameComponent::build) Byte data not a length of 3.");
         }
-        self.bit_stream = data[0];
+        self.id = data[0];
         self.sample_factor(&data[1]);
         self.quantization_table_selector = data[2];
     }
@@ -225,7 +225,7 @@ impl ScanHeader {
 
 #[derive(Default, Debug)]
 struct ScanComponent {
-    pub component_selector: u8,    // Cs
+    pub id: u8,                    // Cs
     pub dc_entropy_table_dest: u8, // Tdi
     pub ac_entropy_table_dest: u8, // Tai
     pub mcus: Vec<[i16; 64]>,
@@ -238,7 +238,7 @@ impl ScanComponent {
         self.ac_entropy_table_dest = byte & 0x0f;
     }
     fn build(&mut self, data: &Vec<u8>) {
-        self.component_selector = data[0];
+        self.id = data[0];
         self.entropy_table_dest(&data[1]);
         self.mcus = Vec::with_capacity(64);
         self.prev_dc_coefficient = 0;
@@ -828,12 +828,13 @@ impl BitReader {
 fn next_symbol(bit_reader: &mut BitReader, hf: &HuffmanTable) -> Option<u8> {
     let mut code: u16 = bit_reader.next_bit().unwrap().into();
     let mut idx = 0;
-    while hf.maxcode[idx].is_none() || hf.maxcode[idx].is_some_and(|max| code > max) {
+    while idx < 16 && (hf.maxcode[idx].is_none() || hf.maxcode[idx].is_some_and(|max| code > max)) {
         let bit = bit_reader.next_bit().unwrap();
         code = (code << 1) + u16::from(bit);
         idx += 1;
     }
     if idx >= 16 {
+        println!("Couldn't find symbol '{:16b}'", code);
         return None;
     }
     let mut j: usize = hf.valptr[idx];
@@ -841,8 +842,8 @@ fn next_symbol(bit_reader: &mut BitReader, hf: &HuffmanTable) -> Option<u8> {
     return Some(*hf.huffman_values.get(j).unwrap())
 }
 
-fn decode_mcu_component(
-    component: &mut ScanComponent, 
+fn decode_data_block(
+    component: &mut ScanComponent,
     bit_reader: &mut BitReader, 
     dc: &HuffmanTable,
     ac: &HuffmanTable
@@ -952,34 +953,52 @@ fn decode_mcu_component(
 
 fn decode_huffman_to_mcus(frame: &mut Frame) {
     // The dimensions of a non-interleaved mcu is 8x8 (the same as a data unit)
-    // An interleaved mcu can contain one or more data units from each component.
+    // An interleaved mcu can contain one or more data units per component.
     //
     // We add 7 and then divide 8 to complete any incomplete MCU
-    let mcu_height: u16 = (frame.frame_header.total_vertical_lines + 7) / 8;
-    let mcu_width: u16 = (frame.frame_header.total_horizontal_lines + 7) / 8;
-    //let mut mcus: Vec<u8> = Vec::with_capacity(usize::from(mcu_height * mcu_width));
-    let scan: &mut Scan = frame.scans.first_mut().unwrap();
-    let mut bit_reader = BitReader::new(&scan.entropy_coded_segments);
-
-    for i in 0..mcu_height * mcu_width {
-        let restart: bool = frame.restart_interval.as_ref().is_some_and(|ri| i % ri.interval == 0);
-        for component in scan.scan_header.components.iter_mut() {
-            println!("Start MCU for component {}", component.component_selector);
-            if restart {
-                component.prev_dc_coefficient = 0;
-                bit_reader.align(); // Align bit reader to next bit on restart.
-            }
-            println!("DC Table: {} | AC Table: {}", component.dc_entropy_table_dest, component.ac_entropy_table_dest);
-            decode_mcu_component(
-                component, 
-                &mut bit_reader,
-                &frame.dc_huffman_tables.get(usize::from(component.dc_entropy_table_dest)).unwrap(),
-                &frame.ac_huffman_tables.get(usize::from(component.ac_entropy_table_dest)).unwrap()
-            );
+    
+    // determine max sampling factors
+    let mut max_vertical_factor = 1;
+    let mut max_horizontal_factor = 1;
+    for component in frame.frame_header.components.iter() {
+        if component.vertical_sample_factor > max_vertical_factor {
+            max_vertical_factor = component.vertical_sample_factor;
+        }
+        if component.horizontal_sample_factor > max_horizontal_factor {
+            max_horizontal_factor = component.horizontal_sample_factor;
         }
     }
-
-    //mcus
+    let mut data_blocks_per_component: [u16; 4] = [0; 4];
+    for (idx, component) in frame.frame_header.components.iter().enumerate() {
+        data_blocks_per_component[idx] = u16::from(component.vertical_sample_factor * component.horizontal_sample_factor);
+    }
+    let data_blocks_per_mcu: u16 = data_blocks_per_component.iter().sum();
+    // To complete an incomplete data block, we add 7 and then divide 8
+    let total_data_blocks_y: u16 = (frame.frame_header.total_vertical_lines + 7) / 8;
+    let total_data_blocks_x: u16 = (frame.frame_header.total_horizontal_lines + 7) / 8;
+    let total_mcus = 1 + (total_data_blocks_y + total_data_blocks_x) / data_blocks_per_mcu;
+    let scan: &mut Scan = frame.scans.first_mut().unwrap();
+    let mut bit_reader = BitReader::new(&scan.entropy_coded_segments);
+    for mcu in 0..total_mcus {
+        let restart: bool = frame.restart_interval.as_ref().is_some_and(|ri| mcu % ri.interval == 0);
+        for (idx, scan_component) in scan.scan_header.components.iter_mut().enumerate() {
+            for _ in 0..data_blocks_per_component[idx] {
+                if restart {
+                    scan_component.prev_dc_coefficient = 0;
+                    bit_reader.align(); // Align bit reader to next bit on restart.
+                }
+                println!("Start MCU for component {}", scan_component.id);
+                println!("DC Table: {} | AC Table: {}", scan_component.dc_entropy_table_dest, scan_component.ac_entropy_table_dest);
+                decode_data_block(
+                    scan_component,
+                    &mut bit_reader,
+                    &frame.dc_huffman_tables.get(usize::from(scan_component.dc_entropy_table_dest)).unwrap(),
+                    &frame.ac_huffman_tables.get(usize::from(scan_component.ac_entropy_table_dest)).unwrap()
+                );
+                println!("Byte: {} | Bit: {}", bit_reader.byte_idx, bit_reader.bit_idx);
+            }
+        }
+    }
 }
 
 // TODO: Write the DECODE method
