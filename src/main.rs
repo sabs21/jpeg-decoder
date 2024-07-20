@@ -743,8 +743,8 @@ fn main() {
                 }
             }*/
             decode_huffman_to_mcus(&mut frame);
-            for scan in frame.scans.iter() {
-                for scan_component in scan.scan_header.components.iter() {
+            for scan in frame.scans.iter_mut() {
+                for scan_component in scan.scan_header.components.iter_mut() {
                     let frame_component: Option<&FrameComponent> = 
                         frame.frame_header.components
                             .iter()
@@ -755,10 +755,14 @@ fn main() {
                                 .iter()
                                 .find(|x| x.destination_id == fc.quantization_table_selector);
                         if let Some(qt) = quantization_table {
-                            println!("Before");
+                            println!("MCUs");
                             println!("{:#?}", scan_component.mcus);
-                            println!("After");
-                            println!("{:#?}", dequantize(scan_component, qt));
+                            println!("After Dequantization");
+                            scan_component.mcus = dequantize(scan_component, qt);
+                            println!("{:#?}", scan_component.mcus);
+                            println!("After IDCT");
+                            scan_component.mcus = idct_component(&scan_component.mcus);
+                            println!("{:#?}", scan_component.mcus);
                         }
                     }
                 }
@@ -1040,9 +1044,6 @@ fn decode_huffman_to_mcus(frame: &mut Frame) {
 
 fn dequantize(scan_component: &ScanComponent, quantization_table: &QuantizationTable) -> Vec<Vec<[i16; 64]>> {
     let mut dequantized_mcus = Vec::new();
-    for mcu in dequantized_mcus.iter_mut() {
-        *mcu = Vec::new();
-    }
     for mcu in scan_component.mcus.iter() {
         let mut dequantized_mcu: Vec<[i16; 64]> = Vec::new();
         for block in mcu.iter() {
@@ -1055,24 +1056,61 @@ fn dequantize(scan_component: &ScanComponent, quantization_table: &QuantizationT
         }
         dequantized_mcus.push(dequantized_mcu);
     }
-    println!("{:#?}", dequantized_mcus);
     dequantized_mcus
 }
 
-/*fn order_data_blocks(scan_component: &ScanComponent, frame_component: &FrameComponent, img_width: &i16, img_height: &i16) -> Vec<[i16; 64]> {
-    let width_in_blocks: i16  = (img_width  + 7) / 8;
-    let height_in_blocks: i16 = (img_height + 7) / 8;
-    let data_blocks: Vec<Vec<[i16; 64]>> = Vec::new();
-    for row in data_blocks.iter_mut() {
-        *row = Vec::new();
+// Inverse Discrete Cosine Transform (aka DCTIII)
+fn idct_component(dequantized_mcus: &Vec<Vec<[i16; 64]>>) -> Vec<Vec<[i16; 64]>> {
+    let mut shifted_mcus: Vec<Vec<[i16; 64]>> = Vec::new();
+    for dequantized_mcu in dequantized_mcus.iter() {
+        let mut shifted_mcu: Vec<[i16; 64]> = Vec::new();
+        for block in dequantized_mcu.iter() {
+            shifted_mcu.push(idct_block(block));
+        }
+        shifted_mcus.push(shifted_mcu);
     }
-    for mcu in scan_component.mcus.iter() {
-        for (idx, block) in mcu.iter().enumerate() {
-            block
+    shifted_mcus
+}
+
+fn idct_block(dequantized_block: &[i16; 64]) -> [i16; 64] {
+    let mut shifted_block: [i16; 64] = [0; 64];
+    let inverse_sqrt_two: f64 = 1_f64 / 2_f64.sqrt();
+    for y in 0..8 {
+        for x in 0..8 {
+            let mut sum: f64 = 0.0;
+            for u in 0..8 {
+                let mut cu: f64 = 1.0;
+                if u == 0 {
+                    cu = inverse_sqrt_two;
+                }
+                for v in 0..8 {
+                    let mut cv: f64 = 1.0;
+                    if v == 0 {
+                        cv = inverse_sqrt_two;
+                    }
+                    sum += cu 
+                        * cv 
+                        * dequantized_block[u * 8 + v] as f64
+                        * (
+                            (2.0 * x as f64 + 1.0)
+                            * v as f64
+                            * std::f64::consts::PI
+                            / 16.0
+                        ).cos()
+                        * (
+                            (2.0 * y as f64 + 1.0)
+                            * u as f64
+                            * std::f64::consts::PI
+                            / 16.0
+                        ).cos();
+                }
+            }
+            sum /= 4.0;
+            shifted_block[y * 8 + x] = sum.round() as i16;
         }
     }
-    data_blocks
-}*/
+    shifted_block
+}
 
 // TODO: Write the DECODE method
 // This will undo the run length encoding and possibly delta encoding.
