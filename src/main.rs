@@ -228,7 +228,7 @@ struct ScanComponent {
     pub id: u8,                    // Cs
     pub dc_entropy_table_dest: u8, // Tdi
     pub ac_entropy_table_dest: u8, // Tai
-    pub mcus: Vec<[i16; 64]>,
+    pub mcus: Vec<Vec<[i16; 64]>>,
     prev_dc_coefficient: i16
 }
 
@@ -240,17 +240,28 @@ impl ScanComponent {
     fn build(&mut self, data: &Vec<u8>) {
         self.id = data[0];
         self.entropy_table_dest(&data[1]);
-        self.mcus = Vec::with_capacity(64);
+        self.mcus = Vec::new();
         self.prev_dc_coefficient = 0;
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 struct QuantizationTable {
     pub length: u16,        // Lq
     pub precision: u8,      // Pq
     pub destination_id: u8, // Tq
-    pub element: Vec<u8>    // Qi; limit 64 capacity
+    pub elements: [u8; 64]    // Qi; limit 64 capacity
+}
+
+impl Default for QuantizationTable {
+    fn default() -> Self {
+        QuantizationTable {
+            length: 0,
+            precision: 0,
+            destination_id: 0,
+            elements: [0; 64]
+        }
+    }
 }
 
 impl QuantizationTable {
@@ -264,8 +275,10 @@ impl QuantizationTable {
         if usize::from(*length) != data.len() {
             panic!("(QuantizationTable::build) (DQT) Byte data length does not correspond to length parameter");
         }
-        self.precision_and_destination_id(&data[2]);
-        self.element = data[3..].to_vec();
+        self.precision_and_destination_id(&data[0]);
+        for (idx, element) in data[1..].iter().enumerate() {
+            self.elements[idx] = *element;
+        }
     }
 }
 
@@ -730,6 +743,26 @@ fn main() {
                 }
             }*/
             decode_huffman_to_mcus(&mut frame);
+            for scan in frame.scans.iter() {
+                for scan_component in scan.scan_header.components.iter() {
+                    let frame_component: Option<&FrameComponent> = 
+                        frame.frame_header.components
+                            .iter()
+                            .find(|x| x.id == scan_component.id);
+                    if let Some(fc) = frame_component {
+                        let quantization_table: Option<&QuantizationTable> = 
+                            frame.quantization_tables
+                                .iter()
+                                .find(|x| x.destination_id == fc.quantization_table_selector);
+                        if let Some(qt) = quantization_table {
+                            println!("Before");
+                            println!("{:#?}", scan_component.mcus);
+                            println!("After");
+                            println!("{:#?}", dequantize(scan_component, qt));
+                        }
+                    }
+                }
+            }
             /*for (i, byte) in frame.scans.first().unwrap().entropy_coded_segments.iter().enumerate() {
                 if i % 16 == 0 {
                     println!("");
@@ -848,7 +881,7 @@ fn decode_data_block(
     dc: &HuffmanTable,
     ac: &HuffmanTable
 ) -> [i16; 64] {
-    let mut mcu: [i16; 64] = [0; 64];
+    let mut data_block: [i16; 64] = [0; 64];
     match next_symbol(bit_reader, dc) {
         Some(dc_symbol) => {
             let coeff_length: u8 = dc_symbol;
@@ -866,8 +899,8 @@ fn decode_data_block(
                         coeff -= (1 << coeff_length) - 1;
                     }
                     // We add the previous dc value here as the predictor.
-                    mcu[0] = coeff + component.prev_dc_coefficient;
-                    component.prev_dc_coefficient = mcu[0];
+                    data_block[0] = coeff + component.prev_dc_coefficient;
+                    component.prev_dc_coefficient = data_block[0];
                 },
                 None => {
                     panic!("Invalid DC coefficient");
@@ -903,7 +936,7 @@ fn decode_data_block(
                     // We've already initialized mcu with all zeros,
                     // so we stop setting any more non-zero values
                     // by returning the mcu.
-                    return mcu
+                    return data_block 
                 }
                 let mut preceeding_zeros: usize = usize::from(ac_symbol >> 4);
                 println!("(AC) Preceeding zeros: {}", preceeding_zeros);
@@ -934,7 +967,7 @@ fn decode_data_block(
                             }
                             println!("(AC) Coefficient: {}", coeff);
                         
-                            mcu[zigzag[ac_counter]] = coeff;
+                            data_block[zigzag[ac_counter]] = coeff;
                             ac_counter += 1;
                         },
                         None => {
@@ -948,7 +981,7 @@ fn decode_data_block(
             }
         }
     }
-    return mcu
+    return data_block 
 }
 
 fn decode_huffman_to_mcus(frame: &mut Frame) {
@@ -979,9 +1012,10 @@ fn decode_huffman_to_mcus(frame: &mut Frame) {
     let total_mcus = 1 + (total_data_blocks_y + total_data_blocks_x) / data_blocks_per_mcu;
     let scan: &mut Scan = frame.scans.first_mut().unwrap();
     let mut bit_reader = BitReader::new(&scan.entropy_coded_segments);
-    for mcu in 0..total_mcus {
-        let restart: bool = frame.restart_interval.as_ref().is_some_and(|ri| mcu % ri.interval == 0);
+    for mcu_idx in 0..total_mcus {
+        let restart: bool = frame.restart_interval.as_ref().is_some_and(|ri| mcu_idx % ri.interval == 0);
         for (idx, scan_component) in scan.scan_header.components.iter_mut().enumerate() {
+            let mut mcu: Vec<[i16; 64]> = Vec::new();
             for _ in 0..data_blocks_per_component[idx] {
                 if restart {
                     scan_component.prev_dc_coefficient = 0;
@@ -989,17 +1023,56 @@ fn decode_huffman_to_mcus(frame: &mut Frame) {
                 }
                 println!("Start MCU for component {}", scan_component.id);
                 println!("DC Table: {} | AC Table: {}", scan_component.dc_entropy_table_dest, scan_component.ac_entropy_table_dest);
-                decode_data_block(
-                    scan_component,
-                    &mut bit_reader,
-                    &frame.dc_huffman_tables.get(usize::from(scan_component.dc_entropy_table_dest)).unwrap(),
-                    &frame.ac_huffman_tables.get(usize::from(scan_component.ac_entropy_table_dest)).unwrap()
+                mcu.push(
+                    decode_data_block(
+                        scan_component,
+                        &mut bit_reader,
+                        &frame.dc_huffman_tables.get(usize::from(scan_component.dc_entropy_table_dest)).unwrap(),
+                        &frame.ac_huffman_tables.get(usize::from(scan_component.ac_entropy_table_dest)).unwrap()
+                    )
                 );
                 println!("Byte: {} | Bit: {}", bit_reader.byte_idx, bit_reader.bit_idx);
             }
+            scan_component.mcus.push(mcu);
         }
     }
 }
+
+fn dequantize(scan_component: &ScanComponent, quantization_table: &QuantizationTable) -> Vec<Vec<[i16; 64]>> {
+    let mut dequantized_mcus = Vec::new();
+    for mcu in dequantized_mcus.iter_mut() {
+        *mcu = Vec::new();
+    }
+    for mcu in scan_component.mcus.iter() {
+        let mut dequantized_mcu: Vec<[i16; 64]> = Vec::new();
+        for block in mcu.iter() {
+            let mut dequantized_block: [i16; 64] = [0; 64];
+            for (value_idx, value) in block.iter().enumerate() {
+                dequantized_block[value_idx] = 
+                    i16::from(quantization_table.elements[value_idx]) * value;
+            }
+            dequantized_mcu.push(dequantized_block);
+        }
+        dequantized_mcus.push(dequantized_mcu);
+    }
+    println!("{:#?}", dequantized_mcus);
+    dequantized_mcus
+}
+
+/*fn order_data_blocks(scan_component: &ScanComponent, frame_component: &FrameComponent, img_width: &i16, img_height: &i16) -> Vec<[i16; 64]> {
+    let width_in_blocks: i16  = (img_width  + 7) / 8;
+    let height_in_blocks: i16 = (img_height + 7) / 8;
+    let data_blocks: Vec<Vec<[i16; 64]>> = Vec::new();
+    for row in data_blocks.iter_mut() {
+        *row = Vec::new();
+    }
+    for mcu in scan_component.mcus.iter() {
+        for (idx, block) in mcu.iter().enumerate() {
+            block
+        }
+    }
+    data_blocks
+}*/
 
 // TODO: Write the DECODE method
 // This will undo the run length encoding and possibly delta encoding.
