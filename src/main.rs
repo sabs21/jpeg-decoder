@@ -1,3 +1,6 @@
+use std::fs::File;
+use std::io::Write;
+
 #[non_exhaustive]
 struct Markers;
 
@@ -810,6 +813,10 @@ fn main() {
                     }
                 }
             }
+            //let path = std::path::Path::new("./images/test.bmp");
+            let path = std::path::Path::new("C:/Users/Nick/projects/jpeg-decode/src/images/output.bmp");
+            create_bmp(&frame, &path);
+            println!("Bitmap output created at: {}", path.as_os_str().to_str().unwrap());
             /*for (i, byte) in frame.scans.first().unwrap().entropy_coded_segments.iter().enumerate() {
                 if i % 16 == 0 {
                     println!("");
@@ -1204,6 +1211,118 @@ fn upscale_mcus(mcus: &Vec<Vec<[i16; 64]>>, horizontal_scaling_factor: usize, ve
         upscaled_mcus.push(upscaled_mcu);
     }
     upscaled_mcus
+}
+
+fn create_bmp(frame: &Frame, path: &std::path::Path) {
+    // All components must have been upscaled prior to calling this function.
+    let mut max_vertical_factor = 1;
+    let mut max_horizontal_factor = 1;
+    for component in frame.frame_header.components.iter() {
+        if component.vertical_sample_factor > max_vertical_factor {
+            max_vertical_factor = component.vertical_sample_factor;
+        }
+        if component.horizontal_sample_factor > max_horizontal_factor {
+            max_horizontal_factor = component.horizontal_sample_factor;
+        }
+    }
+    let data_blocks_per_mcu: u32 = u32::from(max_vertical_factor * max_horizontal_factor);
+    let total_data_blocks_y: u16 = (frame.frame_header.total_vertical_lines + 7) / 8;
+    let total_data_blocks_x: u16 = (frame.frame_header.total_horizontal_lines + 7) / 8;
+    let total_mcus: u32 = 1 + (u32::from(total_data_blocks_y) + u32::from(total_data_blocks_x)) / u32::from(data_blocks_per_mcu);
+    // Header (14 bytes) + InfoHeader (40 bytes) + total bytes across each components mcus (assumed
+    // that each component has been upscaled to the highest resolution)
+    let mcu_size: usize = data_blocks_per_mcu as usize * 64;
+    let image_size: u32 = total_mcus * mcu_size as u32 * 3;
+    let file_size: u32 = 54 + image_size;
+    // Constructing the bmp header
+    // BM (2), file size (4), unused (4), data offset (4)
+    let mut header: [u8; 14] = [0x42, 0x4d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x36, 0x00, 0x00, 0x00];
+    for (idx, byte) in file_size.to_le_bytes().iter().enumerate() {
+        // insert computed file size into header
+        header[idx + 2] = *byte;
+    }
+    // Constructing the bmp info header
+    let mut info_header: [u8; 40] = [0; 40];
+    info_header[0] = 0x28; // size of info header
+    for (idx, byte) in frame.frame_header.total_horizontal_lines.to_le_bytes().iter().enumerate() {
+        info_header[idx + 4] = *byte; // width of image
+    }
+    for (idx, byte) in frame.frame_header.total_vertical_lines.to_le_bytes().iter().enumerate() {
+        info_header[idx + 8] = *byte; // height of image
+    }
+    info_header[12] = 0x01; // number of planes
+    match frame.frame_header.total_components {
+        1 => info_header[14] = 0x01, // 1 bit per pixel
+        3 => info_header[14] = 0x18, // 24 bits per pixel
+        _ => panic!("Unsupported amount of components. 1 component (greyscale) or 3 components (24 bit) are supported.")
+    }
+    info_header[16] = 0x00; // type of compression (none)
+    // offset 20 = compressed image size, but it can be left at 0 since we didnt compress
+    /*for (idx, byte) in image_size.to_le_bytes().iter().enumerate() {
+        info_header[idx + 20] = *byte; // compressed image size
+    }*/
+    // offset 24 & 28 = x and y pixels per meter. Skippable.
+    // offset 32 = colors used. Skippable.
+    // offset 36 = Important colors. 0 means all colors are important
+    // There can be color tables as well for when bits per pixel (offset 14) is less than 8.
+    let mut image_data: Vec<u8> = Vec::new();
+    if frame.frame_header.total_components == 1 {
+        for scan in frame.scans.iter() {
+            for component in scan.scan_header.components.iter() {
+                for mcu in component.mcus.iter() {
+                    for block in mcu.iter() {
+                        for byte in block.iter() {
+                            image_data.push(*byte as u8);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    else {
+        let mut r: Vec<u8> = Vec::new();
+        let mut g: Vec<u8> = Vec::new();
+        let mut b: Vec<u8> = Vec::new();
+        for scan in frame.scans.iter() {
+            for mcu in scan.scan_header.components[0].mcus.iter() {
+                for block in mcu.iter() {
+                    for byte in block.iter() {
+                        r.push(*byte as u8);
+                    }
+                }
+            }
+            for mcu in scan.scan_header.components[1].mcus.iter() {
+                for block in mcu.iter() {
+                    for byte in block.iter() {
+                        g.push(*byte as u8);
+                    }
+                }
+            }
+            for mcu in scan.scan_header.components[2].mcus.iter() {
+                for block in mcu.iter() {
+                    for byte in block.iter() {
+                        b.push(*byte as u8);
+                    }
+                }
+            }
+        }
+        println!("red length: {} | blue length: {} | green length: {}", r.len(), g.len(), b.len());
+        println!("mcu_size: {}", mcu_size);
+        for i in 0..mcu_size {
+            //println!("{}", i);
+            image_data.push(r[i]);
+            image_data.push(g[i]);
+            image_data.push(b[i]);
+        }
+    }
+    let mut bmp_data: Vec<u8> = Vec::new();
+    bmp_data.extend_from_slice(&header);
+    bmp_data.extend_from_slice(&info_header);
+    bmp_data.extend(&image_data);
+    let mut bmp = File::create_new(path).unwrap();
+    bmp.write_all(&bmp_data).expect("Failed to write bmp image");
+
+    //bmp.write_all(info_header);
 }
 
 // TODO: Write the DECODE method
