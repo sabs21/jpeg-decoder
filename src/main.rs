@@ -784,22 +784,24 @@ fn main() {
                                 }
                             }
                             //println!("{:#?}", scan_component.mcus);
-                            let vertical_scaling_factor = max_vertical_factor / fc.vertical_sample_factor;
-                            let horizontal_scaling_factor = max_horizontal_factor / fc.horizontal_sample_factor;
+                            let vertical_scaling_factor: usize = usize::from(max_vertical_factor / fc.vertical_sample_factor);
+                            let horizontal_scaling_factor: usize = usize::from(max_horizontal_factor / fc.horizontal_sample_factor);
                             if vertical_scaling_factor > 1 || horizontal_scaling_factor > 1 {
                                 println!("");
                                 println!("After Upscaling");
+                                scan_component.mcus = upscale_mcus(
+                                    &scan_component.mcus,
+                                    horizontal_scaling_factor,
+                                    vertical_scaling_factor
+                                );
                                 for mcu in scan_component.mcus.iter() {
                                     for block in mcu.iter() {
-                                        let upscaled = upscale_block(&block, horizontal_scaling_factor as usize, vertical_scaling_factor as usize);
-                                        for upscaled_block in upscaled.iter() {
-                                            println!("");
-                                            for (idx, upscaled_sample) in upscaled_block.iter().enumerate() {
-                                                if idx % 8 == 0 {
-                                                    println!("");
-                                                }
-                                                print!("{},\t", upscaled_sample);
+                                        println!("");
+                                        for (idx, sample) in block.iter().enumerate() {
+                                            if idx % 8 == 0 {
+                                                println!("");
                                             }
+                                            print!("{},\t", sample);
                                         }
                                     }
                                 }
@@ -1184,6 +1186,24 @@ fn upscale_block(block: &[i16; 64], horizontal_scaling_factor: usize, vertical_s
         }
     }
     upscaled
+}
+
+fn upscale_mcus(mcus: &Vec<Vec<[i16; 64]>>, horizontal_scaling_factor: usize, vertical_scaling_factor: usize) -> Vec<Vec<[i16; 64]>> {
+    let mut upscaled_mcus: Vec<Vec<[i16; 64]>> = Vec::new();
+    for mcu in mcus.iter() {
+        let mut upscaled_mcu: Vec<[i16; 64]> = Vec::new();
+        for block in mcu.iter() {
+            upscaled_mcu.append(
+                &mut upscale_block(
+                    &block, 
+                    horizontal_scaling_factor as usize, 
+                    vertical_scaling_factor as usize
+                )
+            );
+        }
+        upscaled_mcus.push(upscaled_mcu);
+    }
+    upscaled_mcus
 }
 
 // TODO: Write the DECODE method
