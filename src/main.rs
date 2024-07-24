@@ -743,6 +743,17 @@ fn main() {
                 }
             }*/
             decode_huffman_to_mcus(&mut frame);
+            // determine max sampling factors
+            let mut max_vertical_factor = 1;
+            let mut max_horizontal_factor = 1;
+            for component in frame.frame_header.components.iter() {
+                if component.vertical_sample_factor > max_vertical_factor {
+                    max_vertical_factor = component.vertical_sample_factor;
+                }
+                if component.horizontal_sample_factor > max_horizontal_factor {
+                    max_horizontal_factor = component.horizontal_sample_factor;
+                }
+            } 
             for scan in frame.scans.iter_mut() {
                 for scan_component in scan.scan_header.components.iter_mut() {
                     let frame_component: Option<&FrameComponent> = 
@@ -762,7 +773,37 @@ fn main() {
                             println!("{:#?}", scan_component.mcus);
                             println!("After IDCT");
                             scan_component.mcus = idct_component(&scan_component.mcus);
-                            println!("{:#?}", scan_component.mcus);
+                            for mcu in scan_component.mcus.iter() {
+                                for block in mcu.iter() {
+                                    for (idx, sample) in block.iter().enumerate() {
+                                        if idx % 8 == 0 {
+                                            println!("");
+                                        }
+                                        print!("{},\t", sample);
+                                    }
+                                }
+                            }
+                            //println!("{:#?}", scan_component.mcus);
+                            let vertical_scaling_factor = max_vertical_factor / fc.vertical_sample_factor;
+                            let horizontal_scaling_factor = max_horizontal_factor / fc.horizontal_sample_factor;
+                            if vertical_scaling_factor > 1 || horizontal_scaling_factor > 1 {
+                                println!("");
+                                println!("After Upscaling");
+                                for mcu in scan_component.mcus.iter() {
+                                    for block in mcu.iter() {
+                                        let upscaled = upscale_block(&block, horizontal_scaling_factor as usize, vertical_scaling_factor as usize);
+                                        for upscaled_block in upscaled.iter() {
+                                            println!("");
+                                            for (idx, upscaled_sample) in upscaled_block.iter().enumerate() {
+                                                if idx % 8 == 0 {
+                                                    println!("");
+                                                }
+                                                print!("{},\t", upscaled_sample);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1110,6 +1151,39 @@ fn idct_block(dequantized_block: &[i16; 64]) -> [i16; 64] {
         }
     }
     shifted_block
+}
+
+// Each sample in the block is converted into a subblock with dimensions of horizontal_scaling_factor by vertical_scaling_factor. 
+// These subblocks are then spread across a set of new blocks. The total number of new blocks is govered by
+// horizontal_scaling_factor * vertical_scaling_factor.
+//
+// The result is an upscaled version of a block based on scaling factors.
+fn upscale_block(block: &[i16; 64], horizontal_scaling_factor: usize, vertical_scaling_factor: usize) -> Vec<[i16; 64]> {
+    let mut upscaled: Vec<[i16; 64]> = Vec::new();
+    for _ in 0..vertical_scaling_factor * horizontal_scaling_factor {
+        upscaled.push([0; 64]);
+    }
+    let width: usize = 8 / horizontal_scaling_factor;
+    let height: usize = 8 / vertical_scaling_factor;
+    println!("width: {}\theight: {}", width, height);
+    for (idx, sample) in block.iter().enumerate() {
+        // sample x and y represent the coordinates of the block passed in
+        let sample_x: usize = idx % 8;
+        let sample_y: usize = idx / 8;
+        // b_idx chooses the block to copy the sample value into.
+        let b_idx: usize = ((sample_y / height) * horizontal_scaling_factor) + (sample_x / width);
+        // sb_idx chooses a sub block to replace all existing values with the sample value.
+        // A sub block is a group of samples defined by the dimensions vertical_scaling_factor by horizontal_scaling_factor
+        let sb_idx: usize = (((idx % width) * horizontal_scaling_factor) + (sample_y * vertical_scaling_factor * 8)) % 64;
+        //println!("idx: {} | sample: {}", idx, sample);
+        //println!("sample_x: {}\tsample_y: {}\nb_idx: {}\tsb_idx: {}", sample_x, sample_y, b_idx, sb_idx);
+        for v in 0..vertical_scaling_factor {
+            for h in 0..horizontal_scaling_factor {
+                upscaled[b_idx][sb_idx + h + (v * 8)] = *sample;
+            }
+        }
+    }
+    upscaled
 }
 
 // TODO: Write the DECODE method
