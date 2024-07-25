@@ -490,6 +490,7 @@ enum ReadStage {
     Length,
     Segment,
     DHTSegment,
+    DQTSegment,
     Scan
 }
 
@@ -599,6 +600,9 @@ fn main() {
                         if current_marker_bytes[1] == Some(Markers::DHT) {
                             stage = ReadStage::DHTSegment;
                         }
+                        else if current_marker_bytes[1] == Some(Markers::DQT) {
+                            stage = ReadStage::DQTSegment;
+                        }
                         else if segment_data.len() == segment_length.into() {
                             // Data collection has finished
                             // Build with the collected data
@@ -696,9 +700,6 @@ fn main() {
                             // This is enough to calculate the length
                             // of this table. (There can be multiple
                             // huffman tables in one DHT segment)
-                            for byte in segment_data.iter() {
-                                println!("{}", byte);
-                            }
                             dht_table_length += u16::from(segment_data[1..].iter().sum::<u8>());
                         }
                         else if segment_data.len() == dht_table_length.into() {
@@ -713,15 +714,41 @@ fn main() {
                                 frame.ac_huffman_tables.push(table);
                             }
                             segment_data = Vec::new();
-                            println!("Before subtracting segment length: {} | DHT table length: {}", segment_length, dht_table_length); 
+                            //println!("Before subtracting segment length: {} | DHT table length: {}", segment_length, dht_table_length); 
                             segment_length -= dht_table_length;
-                            println!("Remaining segment length: {}", segment_length); 
+                            //println!("Remaining segment length: {}", segment_length); 
                             dht_table_length = 17;
                         }
-                        println!("{}, {}", segment_data.len(), segment_length);
+                        //println!("{}, {}", segment_data.len(), segment_length);
                         if segment_length == 0 {
                             if segment_data.len() > 0 {
                                 panic!("(DHTSegment) DHT segment completed with unused segment data."); 
+                            }
+                            // Restart the process
+                            segment_length_bytes = [None;2];
+                            stage = ReadStage::Marker;
+                            current_marker_bytes = [None;2];
+                        }
+                    },
+                    ReadStage::DQTSegment => {
+                        segment_data.push(*byte);
+                        
+                        // We check length 17 because that accounts for the
+                        // 1 ID byte
+                        // 64 quantization byte values
+                        // = 65
+                        if segment_data.len() == 65 {
+                            // segment_data now contains the table id and
+                            // all quantization table data.
+                            frame.quantization_tables.push(QuantizationTable::default());
+                            frame.quantization_tables.last_mut().unwrap().build(&65, &segment_data);
+                            segment_data = Vec::new();
+                            segment_length -= 65;
+                        }
+                        if segment_length == 0 {
+                            // We've read all quantization tables from this segment
+                            if segment_data.len() > 0 {
+                                panic!("(DQTSegment) DQT segment completed with unused segment data."); 
                             }
                             // Restart the process
                             segment_length_bytes = [None;2];
@@ -756,7 +783,12 @@ fn main() {
                 if component.horizontal_sample_factor > max_horizontal_factor {
                     max_horizontal_factor = component.horizontal_sample_factor;
                 }
-            } 
+            }
+            /*for scan in frame.scans.iter() {
+                for component in scan.scan_header.components.iter() {
+                    println!("component id: {} | total_mcus: {}", component.id, component.mcus.len());
+                }
+            }*/
             for scan in frame.scans.iter_mut() {
                 for scan_component in scan.scan_header.components.iter_mut() {
                     let frame_component: Option<&FrameComponent> = 
@@ -769,14 +801,14 @@ fn main() {
                                 .iter()
                                 .find(|x| x.destination_id == fc.quantization_table_selector);
                         if let Some(qt) = quantization_table {
-                            println!("MCUs");
-                            println!("{:#?}", scan_component.mcus);
+                            //println!("MCUs");
+                            //println!("{:#?}", scan_component.mcus);
                             println!("After Dequantization");
                             scan_component.mcus = dequantize(scan_component, qt);
-                            println!("{:#?}", scan_component.mcus);
+                            //println!("{:#?}", scan_component.mcus);
                             println!("After IDCT");
                             scan_component.mcus = idct_component(&scan_component.mcus);
-                            for mcu in scan_component.mcus.iter() {
+                            /*for mcu in scan_component.mcus.iter() {
                                 for block in mcu.iter() {
                                     for (idx, sample) in block.iter().enumerate() {
                                         if idx % 8 == 0 {
@@ -785,7 +817,7 @@ fn main() {
                                         print!("{},\t", sample);
                                     }
                                 }
-                            }
+                            }*/
                             //println!("{:#?}", scan_component.mcus);
                             let vertical_scaling_factor: usize = usize::from(max_vertical_factor / fc.vertical_sample_factor);
                             let horizontal_scaling_factor: usize = usize::from(max_horizontal_factor / fc.horizontal_sample_factor);
@@ -797,7 +829,7 @@ fn main() {
                                     horizontal_scaling_factor,
                                     vertical_scaling_factor
                                 );
-                                for mcu in scan_component.mcus.iter() {
+                                /*for mcu in scan_component.mcus.iter() {
                                     for block in mcu.iter() {
                                         println!("");
                                         for (idx, sample) in block.iter().enumerate() {
@@ -807,16 +839,18 @@ fn main() {
                                             print!("{},\t", sample);
                                         }
                                     }
-                                }
+                                }*/
                             }
                         }
                     }
                 }
             }
-            //let path = std::path::Path::new("./images/test.bmp");
+
+            ycbcr_to_rgb(&mut frame);
             let path = std::path::Path::new("C:/Users/Nick/projects/jpeg-decode/src/images/output.bmp");
             create_bmp(&frame, &path);
             println!("Bitmap output created at: {}", path.as_os_str().to_str().unwrap());
+
             /*for (i, byte) in frame.scans.first().unwrap().entropy_coded_segments.iter().enumerate() {
                 if i % 16 == 0 {
                     println!("");
@@ -993,7 +1027,7 @@ fn decode_data_block(
                     return data_block 
                 }
                 let mut preceeding_zeros: usize = usize::from(ac_symbol >> 4);
-                println!("(AC) Preceeding zeros: {}", preceeding_zeros);
+                //println!("(AC) Preceeding zeros: {}", preceeding_zeros);
                 if ac_symbol == 0xf0 {
                     preceeding_zeros = 16;
                 }
@@ -1004,7 +1038,7 @@ fn decode_data_block(
                 // "add" zeros to the mcu by simply adding to the ac_counter.
                 ac_counter += preceeding_zeros;
                 let coeff_length: u8 = ac_symbol & 0x0f;
-                println!("(AC) Coefficient length: {}", coeff_length);
+                //println!("(AC) Coefficient length: {}", coeff_length);
                 if coeff_length > 10 {
                     panic!("(decode_mcu_component) AC coefficient length cannot exceed 10.");
                 }
@@ -1015,11 +1049,11 @@ fn decode_data_block(
                             // convert to signed value
                             // Refer to table H.2 in the spec
                             let mut coeff: i16 = coeff_unsigned.try_into().unwrap();
-                            println!("Coefficient: {:16b} < Shifted: {:16b}?", coeff, (1 << (coeff_length - 1)));
+                            //println!("Coefficient: {:16b} < Shifted: {:16b}?", coeff, (1 << (coeff_length - 1)));
                             if coeff < (1 << (coeff_length - 1)) {
                                 coeff -= (1 << coeff_length) - 1;
                             }
-                            println!("(AC) Coefficient: {}", coeff);
+                            //println!("(AC) Coefficient: {}", coeff);
                         
                             data_block[zigzag[ac_counter]] = coeff;
                             ac_counter += 1;
@@ -1059,11 +1093,12 @@ fn decode_huffman_to_mcus(frame: &mut Frame) {
     for (idx, component) in frame.frame_header.components.iter().enumerate() {
         data_blocks_per_component[idx] = u16::from(component.vertical_sample_factor * component.horizontal_sample_factor);
     }
-    let data_blocks_per_mcu: u16 = data_blocks_per_component.iter().sum();
+    let data_blocks_per_mcu: u16 = u16::from(max_vertical_factor * max_horizontal_factor);
     // To complete an incomplete data block, we add 7 and then divide 8
     let total_data_blocks_y: u16 = (frame.frame_header.total_vertical_lines + 7) / 8;
     let total_data_blocks_x: u16 = (frame.frame_header.total_horizontal_lines + 7) / 8;
-    let total_mcus = 1 + (total_data_blocks_y + total_data_blocks_x) / data_blocks_per_mcu;
+    let total_mcus = (total_data_blocks_y * total_data_blocks_x) / data_blocks_per_mcu;
+    //println!("total_mcus in decode_huffman_to_mcus: {}", total_mcus);
     let scan: &mut Scan = frame.scans.first_mut().unwrap();
     let mut bit_reader = BitReader::new(&scan.entropy_coded_segments);
     for mcu_idx in 0..total_mcus {
@@ -1075,8 +1110,8 @@ fn decode_huffman_to_mcus(frame: &mut Frame) {
                     scan_component.prev_dc_coefficient = 0;
                     bit_reader.align(); // Align bit reader to next bit on restart.
                 }
-                println!("Start MCU for component {}", scan_component.id);
-                println!("DC Table: {} | AC Table: {}", scan_component.dc_entropy_table_dest, scan_component.ac_entropy_table_dest);
+                //println!("Start MCU for component {}", scan_component.id);
+                //println!("DC Table: {} | AC Table: {}", scan_component.dc_entropy_table_dest, scan_component.ac_entropy_table_dest);
                 mcu.push(
                     decode_data_block(
                         scan_component,
@@ -1085,7 +1120,7 @@ fn decode_huffman_to_mcus(frame: &mut Frame) {
                         &frame.ac_huffman_tables.get(usize::from(scan_component.ac_entropy_table_dest)).unwrap()
                     )
                 );
-                println!("Byte: {} | Bit: {}", bit_reader.byte_idx, bit_reader.bit_idx);
+                //println!("Byte: {} | Bit: {}", bit_reader.byte_idx, bit_reader.bit_idx);
             }
             scan_component.mcus.push(mcu);
         }
@@ -1174,7 +1209,7 @@ fn upscale_block(block: &[i16; 64], horizontal_scaling_factor: usize, vertical_s
     }
     let width: usize = 8 / horizontal_scaling_factor;
     let height: usize = 8 / vertical_scaling_factor;
-    println!("width: {}\theight: {}", width, height);
+    //println!("width: {}\theight: {}", width, height);
     for (idx, sample) in block.iter().enumerate() {
         // sample x and y represent the coordinates of the block passed in
         let sample_x: usize = idx % 8;
@@ -1213,6 +1248,59 @@ fn upscale_mcus(mcus: &Vec<Vec<[i16; 64]>>, horizontal_scaling_factor: usize, ve
     upscaled_mcus
 }
 
+fn ycbcr_to_rgb(frame: &mut Frame) {
+    // All components must have been upscaled prior to calling this function.
+    let mut max_vertical_factor = 1;
+    let mut max_horizontal_factor = 1;
+    for component in frame.frame_header.components.iter() {
+        if component.vertical_sample_factor > max_vertical_factor {
+            max_vertical_factor = component.vertical_sample_factor;
+        }
+        if component.horizontal_sample_factor > max_horizontal_factor {
+            max_horizontal_factor = component.horizontal_sample_factor;
+        }
+    }
+    let data_blocks_per_mcu: u32 = u32::from(max_vertical_factor * max_horizontal_factor);
+    let total_data_blocks_y: u16 = (frame.frame_header.total_vertical_lines + 7) / 8;
+    let total_data_blocks_x: u16 = (frame.frame_header.total_horizontal_lines + 7) / 8;
+    let total_mcus: u32 = (u32::from(total_data_blocks_y) * u32::from(total_data_blocks_x)) / u32::from(data_blocks_per_mcu);
+    //println!("max_vertical_factor: {} | max_horizontal_factor: {}", max_vertical_factor, max_horizontal_factor);
+    //println!("data_blocks_per_mcu: {} | total_data_blocks_x: {} | total_data_blocks_y: {} | total_mcus: {}", data_blocks_per_mcu, total_data_blocks_x, total_data_blocks_y, total_mcus);
+    for scan in frame.scans.iter_mut() {
+        if scan.scan_header.total_components == 1 {
+            let component = scan.scan_header.components.first_mut().expect("(ycbcr_to_rgb) Missing luminance component");
+            for mcu in component.mcus.iter_mut() {
+                for block in mcu.iter_mut() {
+                    for byte in block.iter_mut() {
+                        *byte += 128;
+                    }
+                }
+            }
+        }
+        else if scan.scan_header.total_components == 3 {
+            for mcu_idx in 0..total_mcus {
+                for block_idx in 0..data_blocks_per_mcu {
+                    for byte_idx in 0..64 {
+                        //println!("mcu_idx: {} | block_idx: {} | byte_idx: {}", mcu_idx, block_idx, byte_idx);
+                        let y = scan.scan_header.components[0].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize].clone();
+                        let cr = scan.scan_header.components[1].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize].clone();
+                        let cb = scan.scan_header.components[2].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize].clone();
+                        // Red
+                        scan.scan_header.components[0].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] = (y as f32 + 1.402 * cr as f32).round() as i16 + 128;
+                        // Green
+                        scan.scan_header.components[1].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] = (y as f32 - 0.344 * cb as f32 - 0.714 * cr as f32).round() as i16 + 128;
+                        // Blue
+                        scan.scan_header.components[2].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] = (y as f32 + 1.772 * cb as f32).round() as i16 + 128;
+                    }
+                }
+            }
+        }
+        else {
+            panic!("Unsupported number of components");
+        }
+    }
+}
+
 fn create_bmp(frame: &Frame, path: &std::path::Path) {
     // All components must have been upscaled prior to calling this function.
     let mut max_vertical_factor = 1;
@@ -1228,7 +1316,7 @@ fn create_bmp(frame: &Frame, path: &std::path::Path) {
     let data_blocks_per_mcu: u32 = u32::from(max_vertical_factor * max_horizontal_factor);
     let total_data_blocks_y: u16 = (frame.frame_header.total_vertical_lines + 7) / 8;
     let total_data_blocks_x: u16 = (frame.frame_header.total_horizontal_lines + 7) / 8;
-    let total_mcus: u32 = 1 + (u32::from(total_data_blocks_y) + u32::from(total_data_blocks_x)) / u32::from(data_blocks_per_mcu);
+    let total_mcus: u32 = (u32::from(total_data_blocks_y) * u32::from(total_data_blocks_x)) / u32::from(data_blocks_per_mcu);
     // Header (14 bytes) + InfoHeader (40 bytes) + total bytes across each components mcus (assumed
     // that each component has been upscaled to the highest resolution)
     let mcu_size: usize = data_blocks_per_mcu as usize * 64;
@@ -1280,6 +1368,37 @@ fn create_bmp(frame: &Frame, path: &std::path::Path) {
         }
     }
     else {
+        for scan in frame.scans.iter() {
+            for mcu_idx in 0..total_mcus {
+                for block_idx in 0..data_blocks_per_mcu {
+                    for byte_idx in 0..64 {
+                        // Red
+                        image_data.push(scan.scan_header.components[0].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] as u8);
+                        // Green
+                        image_data.push(scan.scan_header.components[1].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] as u8);
+                        // Blue
+                        image_data.push(scan.scan_header.components[2].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] as u8);
+                    }
+                }
+            }
+        }
+    }
+        /*for mcu_idx in 0..total_mcus {
+            for block_idx in 0..data_blocks_per_mcu {
+                for byte_idx in 0..64 {
+                    //println!("mcu_idx: {} | block_idx: {} | byte_idx: {}", mcu_idx, block_idx, byte_idx);
+                    let y = scan.scan_header.components[0].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize].clone();
+                    let cr = scan.scan_header.components[1].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize].clone();
+                    let cb = scan.scan_header.components[2].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize].clone();
+                    // Red
+                    scan.scan_header.components[0].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] = (y as f32 + 1.402 * cr as f32).round() as i16 + 128;
+                    // Green
+                    scan.scan_header.components[1].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] = (y as f32 - 0.344 * cb as f32 - 0.714 * cr as f32).round() as i16 + 128;
+                    // Blue
+                    scan.scan_header.components[2].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] = (y as f32 + 1.772 * cb as f32).round() as i16 + 128;
+                }
+            }
+        }
         let mut r: Vec<u8> = Vec::new();
         let mut g: Vec<u8> = Vec::new();
         let mut b: Vec<u8> = Vec::new();
@@ -1306,21 +1425,22 @@ fn create_bmp(frame: &Frame, path: &std::path::Path) {
                 }
             }
         }
-        println!("red length: {} | blue length: {} | green length: {}", r.len(), g.len(), b.len());
-        println!("mcu_size: {}", mcu_size);
+        //println!("red length: {} | blue length: {} | green length: {}", r.len(), g.len(), b.len());
+        //println!("mcu_size: {}", mcu_size);
         for i in 0..mcu_size {
             //println!("{}", i);
             image_data.push(r[i]);
             image_data.push(g[i]);
             image_data.push(b[i]);
         }
-    }
+    }*/
     let mut bmp_data: Vec<u8> = Vec::new();
     bmp_data.extend_from_slice(&header);
     bmp_data.extend_from_slice(&info_header);
     bmp_data.extend(&image_data);
     let mut bmp = File::create_new(path).unwrap();
     bmp.write_all(&bmp_data).expect("Failed to write bmp image");
+    //println!("{:#?}", bmp_data);
 
     //bmp.write_all(info_header);
 }
