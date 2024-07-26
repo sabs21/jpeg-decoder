@@ -803,7 +803,26 @@ fn main() {
                 }
             }*/
             decode_huffman_to_mcus(&mut frame);
-            
+            /*for scan in frame.scans.iter_mut() {
+                for component in scan.scan_header.components.iter_mut() {
+                    for (mcu_idx, mcu) in component.mcus.iter_mut().enumerate() {
+                        for (block_idx, block) in mcu.iter_mut().enumerate() {
+                            for (byte_idx, byte) in block.iter_mut().enumerate() {
+                                /*if byte > &127 || byte < &-128 {
+                                    println!("component id: {} | mcu_idx: {} | block_idx: {} | byte_idx: {} | byte value: {}", component.id, mcu_idx, block_idx, byte_idx, byte);
+                                }*/
+                                if byte > &mut 126 {
+                                    *byte = 126;
+                                } else if byte < &mut -127 {
+                                    *byte = -127;
+                                }
+                            }
+                        }
+                    }
+                    println!("component id: {} | total_mcus: {}", component.id, component.mcus.len());
+                }
+            }*/
+
             // determine max sampling factors
             let mut max_vertical_factor = 1;
             let mut max_horizontal_factor = 1;
@@ -1262,6 +1281,7 @@ fn idct_block(dequantized_block: &[i16; 64]) -> [i16; 64] {
                 }
             }
             sum /= 4.0;
+            // We must clamp the values to remain within the range 0 to 2^(7)
             shifted_block[y * 8 + x] = sum.round() as i16;
         }
     }
@@ -1375,11 +1395,11 @@ fn ycbcr_to_rgb(frame: &mut Frame) {
                     let cb = scan.scan_header.components[1].mcus[mcu_idx][bounded_cb_block_idx][pixel_idx].clone();
                     let cr = scan.scan_header.components[2].mcus[mcu_idx][bounded_cr_block_idx][pixel_idx].clone();
                     // Red
-                    scan.scan_header.components[0].mcus[mcu_idx][bounded_y_block_idx][pixel_idx] = (y as f32 + 1.402 * cr as f32).round() as i16 + 128;
+                    scan.scan_header.components[0].mcus[mcu_idx][bounded_y_block_idx][pixel_idx] = ((y as f32 + 1.402 * cr as f32).round() as i16 + 128).max(0).min(255);
                     // Green
-                    scan.scan_header.components[1].mcus[mcu_idx][bounded_cb_block_idx][pixel_idx] = (y as f32 - (0.344 * cb as f32) - (0.714 * cr as f32)).round() as i16 + 128;
+                    scan.scan_header.components[1].mcus[mcu_idx][bounded_cb_block_idx][pixel_idx] = ((y as f32 - (0.344 * cb as f32) - (0.714 * cr as f32)).round() as i16 + 128).max(0).min(255);
                     // Blue
-                    scan.scan_header.components[2].mcus[mcu_idx][bounded_cr_block_idx][pixel_idx] = (y as f32 + 1.772 * cb as f32).round() as i16 + 128;
+                    scan.scan_header.components[2].mcus[mcu_idx][bounded_cr_block_idx][pixel_idx] = ((y as f32 + 1.772 * cb as f32).round() as i16 + 128).max(0).min(255);
                 }
             }
         }
