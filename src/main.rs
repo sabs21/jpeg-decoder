@@ -371,7 +371,37 @@ impl HuffmanTable {
         // Decode the huffman table
         let sizes: Vec<u8> =  self.generate_size_table();
         let codes: Vec<u16> = self.generate_code_table(&sizes);
+        //println!("Sizes\n{:#?}", sizes);
+        //println!("Codes\n{:#?}", codes);
         self.decoder_tables(&codes);
+        /*println!();
+        println!("Valptr");
+        for (idx, val) in self.valptr.iter().enumerate() {
+            if idx % 8 == 0 {
+                println!();
+            }
+            print!("{}, ", val);
+        }
+        println!();
+        println!("Mincode");
+        for (idx, val) in self.mincode.iter().enumerate() {
+            if idx % 8 == 0 {
+                println!();
+            }
+            print!("{}, ", val);
+        }
+        println!();
+        println!("Maxcode");
+        for (idx, val) in self.maxcode.iter().enumerate() {
+            if idx % 8 == 0 {
+                println!();
+            }
+            match val {
+                Some(v) => print!("{}, ", v),
+                None => print!("None, ")
+            }
+        }*/
+        //println!("Valptr\n{:#?}\nMincode\n{:#?}\nMaxcode\n{:#?}", self.valptr, self.mincode, self.maxcode);
     }
 }
 
@@ -773,6 +803,7 @@ fn main() {
                 }
             }*/
             decode_huffman_to_mcus(&mut frame);
+            
             // determine max sampling factors
             let mut max_vertical_factor = 1;
             let mut max_horizontal_factor = 1;
@@ -819,7 +850,7 @@ fn main() {
                                 }
                             }*/
                             //println!("{:#?}", scan_component.mcus);
-                            let vertical_scaling_factor: usize = usize::from(max_vertical_factor / fc.vertical_sample_factor);
+                            /*let vertical_scaling_factor: usize = usize::from(max_vertical_factor / fc.vertical_sample_factor);
                             let horizontal_scaling_factor: usize = usize::from(max_horizontal_factor / fc.horizontal_sample_factor);
                             if vertical_scaling_factor > 1 || horizontal_scaling_factor > 1 {
                                 println!("");
@@ -840,11 +871,16 @@ fn main() {
                                         }
                                     }
                                 }*/
-                            }
+                            }*/
                         }
                     }
                 }
             }
+            /*for scan in frame.scans.iter() {
+                for component in scan.scan_header.components.iter() {
+                    println!("component id: {} | total mcus: {}", component.id, component.mcus.len());
+                }
+            }*/
 
             ycbcr_to_rgb(&mut frame);
             let path = std::path::Path::new("C:/Users/Nick/projects/jpeg-decode/src/images/output.bmp");
@@ -918,18 +954,19 @@ impl BitReader {
         }
         return Some(bit)
     }
-
+    
+    // RECIEVE function in the spec (F.2.2.4)
     fn next_bits(&mut self, length: &u8) -> Option<u16> {
         if *length > 16 {
             panic!("(next_bits) Length supplied is greater than 16. Overflow error.");
         }
         let mut bits: u16 = 0;
-        for _ in 0..isize::from(*length) {
+        for _ in 0..usize::from(*length) {
             let bit = self.next_bit();
             if bit.is_none() {
                 return None
             }
-            bits = bits << 1 | u16::from(bit.expect("End of bitstream."));
+            bits = (bits << 1) | u16::from(bit.expect("End of bitstream."));
         }
         return Some(bits)
     }
@@ -950,8 +987,8 @@ fn next_symbol(bit_reader: &mut BitReader, hf: &HuffmanTable) -> Option<u8> {
     let mut code: u16 = bit_reader.next_bit().unwrap().into();
     let mut idx = 0;
     while idx < 16 && (hf.maxcode[idx].is_none() || hf.maxcode[idx].is_some_and(|max| code > max)) {
-        let bit = bit_reader.next_bit().unwrap();
-        code = (code << 1) + u16::from(bit);
+        let next_bit: u16 = u16::from(bit_reader.next_bit().unwrap());
+        code = (code << 1) + next_bit;
         idx += 1;
     }
     if idx >= 16 {
@@ -959,7 +996,7 @@ fn next_symbol(bit_reader: &mut BitReader, hf: &HuffmanTable) -> Option<u8> {
         return None;
     }
     let mut j: usize = hf.valptr[idx];
-    j = (j + usize::try_from(code).unwrap()) - usize::try_from(hf.mincode[idx]).unwrap();
+    j = j + usize::try_from(code).unwrap() - usize::try_from(hf.mincode[idx]).unwrap();
     return Some(*hf.huffman_values.get(j).unwrap())
 }
 
@@ -975,7 +1012,7 @@ fn decode_data_block(
             let coeff_length: u8 = dc_symbol;
             //println!("(DC) coefficient length: {}", coeff_length);
             if coeff_length > 11 {
-                panic!("(next_entry) DC coefficient cannot have length greater than 11.")
+                panic!("(decode_data_block) DC coefficient cannot have length greater than 11.")
             }
             match bit_reader.next_bits(&coeff_length) {
                 Some(coeff_unsigned) => {
@@ -1032,7 +1069,7 @@ fn decode_data_block(
                     preceeding_zeros = 16;
                 }
                 if ac_counter + preceeding_zeros >= 64 {
-                    panic!("(decode_mcu_component) Total preceeding zeros exceeds bounds of current mcu");
+                    panic!("(decode_data_block) Total preceeding zeros exceeds bounds of current data block");
                 }
                 // We have already initialized the mcu array with zeros, so we
                 // "add" zeros to the mcu by simply adding to the ac_counter.
@@ -1040,7 +1077,7 @@ fn decode_data_block(
                 let coeff_length: u8 = ac_symbol & 0x0f;
                 //println!("(AC) Coefficient length: {}", coeff_length);
                 if coeff_length > 10 {
-                    panic!("(decode_mcu_component) AC coefficient length cannot exceed 10.");
+                    panic!("(decode_data_block) AC coefficient length cannot exceed 10.");
                 }
                 else if coeff_length > 0 {
                     match bit_reader.next_bits(&coeff_length) {
@@ -1090,22 +1127,25 @@ fn decode_huffman_to_mcus(frame: &mut Frame) {
         }
     }
     let mut data_blocks_per_component: [u16; 4] = [0; 4];
+    let mut data_blocks_per_mcu: u16 = 0;
     for (idx, component) in frame.frame_header.components.iter().enumerate() {
         data_blocks_per_component[idx] = u16::from(component.vertical_sample_factor * component.horizontal_sample_factor);
+        data_blocks_per_mcu += data_blocks_per_component[idx];
     }
-    let data_blocks_per_mcu: u16 = u16::from(max_vertical_factor * max_horizontal_factor);
+    //let data_blocks_per_mcu: u16 = u16::from(max_vertical_factor * max_horizontal_factor);
     // To complete an incomplete data block, we add 7 and then divide 8
-    let total_data_blocks_y: u16 = (frame.frame_header.total_vertical_lines + 7) / 8;
-    let total_data_blocks_x: u16 = (frame.frame_header.total_horizontal_lines + 7) / 8;
-    let total_mcus = (total_data_blocks_y * total_data_blocks_x) / data_blocks_per_mcu;
+    let total_mcus_y: u16 = (frame.frame_header.total_vertical_lines + ((8 * max_vertical_factor as u16) - 1)) / (8 * max_vertical_factor) as u16;
+    let total_mcus_x: u16 = (frame.frame_header.total_horizontal_lines + ((8 * max_horizontal_factor as u16) - 1)) / (8 * max_horizontal_factor) as u16;
+    let total_mcus: u32 = u32::from(total_mcus_y) * u32::from(total_mcus_x); 
+    //println!("total y data blocks: {} | total x data blocks: {}", total_data_blocks_y, total_data_blocks_x);
     //println!("total_mcus in decode_huffman_to_mcus: {}", total_mcus);
     let scan: &mut Scan = frame.scans.first_mut().unwrap();
     let mut bit_reader = BitReader::new(&scan.entropy_coded_segments);
     for mcu_idx in 0..total_mcus {
-        let restart: bool = frame.restart_interval.as_ref().is_some_and(|ri| mcu_idx % ri.interval == 0);
-        for (idx, scan_component) in scan.scan_header.components.iter_mut().enumerate() {
+        let restart: bool = frame.restart_interval.as_ref().is_some_and(|ri| mcu_idx % ri.interval as u32 == 0);
+        for scan_component in scan.scan_header.components.iter_mut() {
             let mut mcu: Vec<[i16; 64]> = Vec::new();
-            for _ in 0..data_blocks_per_component[idx] {
+            for _ in 0..data_blocks_per_component[usize::from(scan_component.id - 1)] {
                 if restart {
                     scan_component.prev_dc_coefficient = 0;
                     bit_reader.align(); // Align bit reader to next bit on restart.
@@ -1122,6 +1162,15 @@ fn decode_huffman_to_mcus(frame: &mut Frame) {
                 );
                 //println!("Byte: {} | Bit: {}", bit_reader.byte_idx, bit_reader.bit_idx);
             }
+            /*for block in mcu.iter() {
+                for (idx, byte) in block.iter().enumerate() {
+                    if idx % 8 == 0 {
+                        println!();
+                    }
+                    print!("{}, ", byte);
+                }
+            }*/
+            
             scan_component.mcus.push(mcu);
         }
     }
@@ -1249,7 +1298,6 @@ fn upscale_mcus(mcus: &Vec<Vec<[i16; 64]>>, horizontal_scaling_factor: usize, ve
 }
 
 fn ycbcr_to_rgb(frame: &mut Frame) {
-    // All components must have been upscaled prior to calling this function.
     let mut max_vertical_factor = 1;
     let mut max_horizontal_factor = 1;
     for component in frame.frame_header.components.iter() {
@@ -1261,9 +1309,12 @@ fn ycbcr_to_rgb(frame: &mut Frame) {
         }
     }
     let data_blocks_per_mcu: u32 = u32::from(max_vertical_factor * max_horizontal_factor);
-    let total_data_blocks_y: u16 = (frame.frame_header.total_vertical_lines + 7) / 8;
-    let total_data_blocks_x: u16 = (frame.frame_header.total_horizontal_lines + 7) / 8;
-    let total_mcus: u32 = (u32::from(total_data_blocks_y) * u32::from(total_data_blocks_x)) / u32::from(data_blocks_per_mcu);
+    //let total_data_blocks_y: u16 = (frame.frame_header.total_vertical_lines + ((8 * max_vertical_factor as u16) - 1)) / (8 * max_vertical_factor) as u16; 
+    //let total_data_blocks_x: u16 = (frame.frame_header.total_vertical_lines + ((8 * max_horizontal_factor as u16) - 1)) / (8 * max_horizontal_factor) as u16; 
+    //let total_mcus: u32 = (u32::from(total_data_blocks_y) * u32::from(total_data_blocks_x)) / u32::from(data_blocks_per_mcu);
+    let total_mcus_y: u16 = (frame.frame_header.total_vertical_lines + ((8 * max_vertical_factor as u16) - 1)) / (8 * max_vertical_factor) as u16;
+    let total_mcus_x: u16 = (frame.frame_header.total_horizontal_lines + ((8 * max_horizontal_factor as u16) - 1)) / (8 * max_horizontal_factor) as u16;
+    let total_mcus: u32 = u32::from(total_mcus_y) * u32::from(total_mcus_x);
     //println!("max_vertical_factor: {} | max_horizontal_factor: {}", max_vertical_factor, max_horizontal_factor);
     //println!("data_blocks_per_mcu: {} | total_data_blocks_x: {} | total_data_blocks_y: {} | total_mcus: {}", data_blocks_per_mcu, total_data_blocks_x, total_data_blocks_y, total_mcus);
     for scan in frame.scans.iter_mut() {
@@ -1280,17 +1331,26 @@ fn ycbcr_to_rgb(frame: &mut Frame) {
         else if scan.scan_header.total_components == 3 {
             for mcu_idx in 0..total_mcus {
                 for block_idx in 0..data_blocks_per_mcu {
+                    let y_mcu_idx = mcu_idx as usize % scan.scan_header.components[0].mcus.len();
+                    let y_block_idx = block_idx as usize % scan.scan_header.components[0].mcus[y_mcu_idx].len();
+                    //let y = scan.scan_header.components[0].mcus[y_mcu_idx][block_idx as usize % scan.scan_header.components[0].mcus[y_mcu_idx].len()].clone();
+                    let cb_mcu_idx = mcu_idx as usize % scan.scan_header.components[1].mcus.len();
+                    let cb_block_idx = block_idx as usize % scan.scan_header.components[1].mcus[cb_mcu_idx].len();
+                    //let cb = scan.scan_header.components[1].mcus[cb_mcu_idx][block_idx as usize % scan.scan_header.components[1].mcus[cb_mcu_idx].len()].clone(); 
+                    let cr_mcu_idx = mcu_idx as usize % scan.scan_header.components[2].mcus.len();
+                    let cr_block_idx = block_idx as usize % scan.scan_header.components[2].mcus[cr_mcu_idx].len();
+                    //let cr = scan.scan_header.components[2].mcus[cr_mcu_idx][block_idx as usize % scan.scan_header.components[2].mcus[cr_mcu_idx].len()].clone();
                     for byte_idx in 0..64 {
                         //println!("mcu_idx: {} | block_idx: {} | byte_idx: {}", mcu_idx, block_idx, byte_idx);
-                        let y = scan.scan_header.components[0].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize].clone();
-                        let cr = scan.scan_header.components[1].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize].clone();
-                        let cb = scan.scan_header.components[2].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize].clone();
+                        let y = scan.scan_header.components[0].mcus[y_mcu_idx][y_block_idx][byte_idx as usize].clone();
+                        let cr = scan.scan_header.components[1].mcus[cb_mcu_idx][cb_block_idx][byte_idx as usize].clone();
+                        let cb = scan.scan_header.components[2].mcus[cr_mcu_idx][cr_block_idx][byte_idx as usize].clone();
                         // Red
-                        scan.scan_header.components[0].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] = (y as f32 + 1.402 * cr as f32).round() as i16 + 128;
+                        scan.scan_header.components[0].mcus[y_mcu_idx][y_block_idx][byte_idx as usize] = (y as f32 + 1.402 * cr as f32).round() as i16 + 128;
                         // Green
-                        scan.scan_header.components[1].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] = (y as f32 - 0.344 * cb as f32 - 0.714 * cr as f32).round() as i16 + 128;
+                        scan.scan_header.components[1].mcus[cb_mcu_idx][cb_block_idx][byte_idx as usize] = (y as f32 - (0.344 * cb as f32) - (0.714 * cr as f32)).round() as i16 + 128;
                         // Blue
-                        scan.scan_header.components[2].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] = (y as f32 + 1.772 * cb as f32).round() as i16 + 128;
+                        scan.scan_header.components[2].mcus[cr_mcu_idx][cr_block_idx][byte_idx as usize] = (y as f32 + 1.772 * cb as f32).round() as i16 + 128;
                     }
                 }
             }
@@ -1313,15 +1373,28 @@ fn create_bmp(frame: &Frame, path: &std::path::Path) {
             max_horizontal_factor = component.horizontal_sample_factor;
         }
     }
-    let data_blocks_per_mcu: u32 = u32::from(max_vertical_factor * max_horizontal_factor);
-    let total_data_blocks_y: u16 = (frame.frame_header.total_vertical_lines + 7) / 8;
-    let total_data_blocks_x: u16 = (frame.frame_header.total_horizontal_lines + 7) / 8;
-    let total_mcus: u32 = (u32::from(total_data_blocks_y) * u32::from(total_data_blocks_x)) / u32::from(data_blocks_per_mcu);
+    /*let mut data_blocks_per_component: [u16; 4] = [0; 4];
+    let mut data_blocks_per_mcu: u16 = 0;
+    for (idx, component) in frame.frame_header.components.iter().enumerate() {
+        data_blocks_per_component[idx] = u16::from(component.vertical_sample_factor * component.horizontal_sample_factor);
+        data_blocks_per_mcu += data_blocks_per_component[idx];
+    }*/
+    //let total_data_blocks_y: u16 = (frame.frame_header.total_vertical_lines + 7) / 8;
+    let total_mcus_y: u16 = (frame.frame_header.total_vertical_lines + ((8 * max_vertical_factor as u16) - 1)) / (8 * max_vertical_factor) as u16;
+    //let total_data_blocks_x: u16 = (frame.frame_header.total_horizontal_lines + 7) / 8;
+    let total_mcus_x: u16 = (frame.frame_header.total_horizontal_lines + ((8 * max_horizontal_factor as u16) - 1)) / (8 * max_horizontal_factor) as u16;
+    let total_mcus: u32 = u32::from(total_mcus_y) * u32::from(total_mcus_x);
     // Header (14 bytes) + InfoHeader (40 bytes) + total bytes across each components mcus (assumed
     // that each component has been upscaled to the highest resolution)
-    let mcu_size: usize = data_blocks_per_mcu as usize * 64;
-    let image_size: u32 = total_mcus * mcu_size as u32 * 3;
-    let file_size: u32 = 54 + image_size;
+    //let mcu_size: usize = data_blocks_per_mcu as usize;
+    // Bitmap files dimensions must end in a multiple of 4. If it is not yet a
+    // multiple of 4, pad the width and height accordingly.
+    //let padding_x = frame.frame_header.total_vertical_lines % 4;
+    //let padding_y = frame.frame_header.total_horizontal_lines % 4;
+    // Keep in mind we need 3 pixels per pixel per component
+    let image_size: u32 = total_mcus * 64 * max_horizontal_factor as u32 * max_vertical_factor as u32 * 3;
+    println!("Image size: {} bytes", image_size);
+    let file_size: u32 = 26 + image_size;//54 + image_size;
     // Constructing the bmp header
     // BM (2), file size (4), unused (4), data offset (4)
     let mut header: [u8; 14] = [0x42, 0x4d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x36, 0x00, 0x00, 0x00];
@@ -1330,21 +1403,21 @@ fn create_bmp(frame: &Frame, path: &std::path::Path) {
         header[idx + 2] = *byte;
     }
     // Constructing the bmp info header
-    let mut info_header: [u8; 40] = [0; 40];
-    info_header[0] = 0x28; // size of info header
+    let mut info_header: [u8; 18] = [0; 18];
+    info_header[0] = 0x0c; // size of info header
     for (idx, byte) in frame.frame_header.total_horizontal_lines.to_le_bytes().iter().enumerate() {
         info_header[idx + 4] = *byte; // width of image
     }
     for (idx, byte) in frame.frame_header.total_vertical_lines.to_le_bytes().iter().enumerate() {
-        info_header[idx + 8] = *byte; // height of image
+        info_header[idx + 6] = *byte; // height of image
     }
-    info_header[12] = 0x01; // number of planes
+    info_header[8] = 0x01; // number of planes
     match frame.frame_header.total_components {
-        1 => info_header[14] = 0x01, // 1 bit per pixel
-        3 => info_header[14] = 0x18, // 24 bits per pixel
+        1 => info_header[10] = 0x01, // 1 bit per pixel
+        3 => info_header[10] = 0x18, // 24 bits per pixel
         _ => panic!("Unsupported amount of components. 1 component (greyscale) or 3 components (24 bit) are supported.")
     }
-    info_header[16] = 0x00; // type of compression (none)
+    //info_header[16] = 0x00; // offset 16 = type of compression (none)
     // offset 20 = compressed image size, but it can be left at 0 since we didnt compress
     /*for (idx, byte) in image_size.to_le_bytes().iter().enumerate() {
         info_header[idx + 20] = *byte; // compressed image size
@@ -1353,13 +1426,16 @@ fn create_bmp(frame: &Frame, path: &std::path::Path) {
     // offset 32 = colors used. Skippable.
     // offset 36 = Important colors. 0 means all colors are important
     // There can be color tables as well for when bits per pixel (offset 14) is less than 8.
-    let mut image_data: Vec<u8> = Vec::new();
+    let mut image_data: Vec<u8> = Vec::with_capacity((image_size+1) as usize);
+    for _ in 0..image_size+1 {
+        image_data.push(0);
+    }
     if frame.frame_header.total_components == 1 {
         for scan in frame.scans.iter() {
             for component in scan.scan_header.components.iter() {
-                for mcu in component.mcus.iter() {
-                    for block in mcu.iter() {
-                        for byte in block.iter() {
+                for mcu in component.mcus.iter().rev() {
+                    for block in mcu.iter().rev() {
+                        for byte in block.iter().rev() {
                             image_data.push(*byte as u8);
                         }
                     }
@@ -1369,80 +1445,32 @@ fn create_bmp(frame: &Frame, path: &std::path::Path) {
     }
     else {
         for scan in frame.scans.iter() {
-            for mcu_idx in 0..total_mcus {
-                for block_idx in 0..data_blocks_per_mcu {
-                    for byte_idx in 0..64 {
-                        // Red
-                        image_data.push(scan.scan_header.components[0].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] as u8);
-                        // Green
-                        image_data.push(scan.scan_header.components[1].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] as u8);
-                        // Blue
-                        image_data.push(scan.scan_header.components[2].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] as u8);
+            let mut image_data_idx = 0;
+            for y in (0..frame.frame_header.total_vertical_lines).rev() {
+                let mcu_y = y as usize / (8 * max_vertical_factor as usize);
+                let pixel_y = y as usize % 8;
+                for x in (0..frame.frame_header.total_horizontal_lines).rev() {
+                    let mcu_x = x as usize / (8 * max_horizontal_factor as usize);
+                    let pixel_x = x as usize % 8;
+                    let mcu_idx = mcu_y * total_mcus_x as usize + mcu_x;
+                    let pixel_idx = pixel_y * 8 + pixel_x;
+                    for component in scan.scan_header.components.iter().rev() {
+                        for block in component.mcus[mcu_idx].iter().rev() {
+                            image_data[image_data_idx] = block[pixel_idx] as u8;
+                            image_data_idx += 1;
+                        }
                     }
                 }
             }
         }
     }
-        /*for mcu_idx in 0..total_mcus {
-            for block_idx in 0..data_blocks_per_mcu {
-                for byte_idx in 0..64 {
-                    //println!("mcu_idx: {} | block_idx: {} | byte_idx: {}", mcu_idx, block_idx, byte_idx);
-                    let y = scan.scan_header.components[0].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize].clone();
-                    let cr = scan.scan_header.components[1].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize].clone();
-                    let cb = scan.scan_header.components[2].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize].clone();
-                    // Red
-                    scan.scan_header.components[0].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] = (y as f32 + 1.402 * cr as f32).round() as i16 + 128;
-                    // Green
-                    scan.scan_header.components[1].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] = (y as f32 - 0.344 * cb as f32 - 0.714 * cr as f32).round() as i16 + 128;
-                    // Blue
-                    scan.scan_header.components[2].mcus[mcu_idx as usize][block_idx as usize][byte_idx as usize] = (y as f32 + 1.772 * cb as f32).round() as i16 + 128;
-                }
-            }
-        }
-        let mut r: Vec<u8> = Vec::new();
-        let mut g: Vec<u8> = Vec::new();
-        let mut b: Vec<u8> = Vec::new();
-        for scan in frame.scans.iter() {
-            for mcu in scan.scan_header.components[0].mcus.iter() {
-                for block in mcu.iter() {
-                    for byte in block.iter() {
-                        r.push(*byte as u8);
-                    }
-                }
-            }
-            for mcu in scan.scan_header.components[1].mcus.iter() {
-                for block in mcu.iter() {
-                    for byte in block.iter() {
-                        g.push(*byte as u8);
-                    }
-                }
-            }
-            for mcu in scan.scan_header.components[2].mcus.iter() {
-                for block in mcu.iter() {
-                    for byte in block.iter() {
-                        b.push(*byte as u8);
-                    }
-                }
-            }
-        }
-        //println!("red length: {} | blue length: {} | green length: {}", r.len(), g.len(), b.len());
-        //println!("mcu_size: {}", mcu_size);
-        for i in 0..mcu_size {
-            //println!("{}", i);
-            image_data.push(r[i]);
-            image_data.push(g[i]);
-            image_data.push(b[i]);
-        }
-    }*/
+    
     let mut bmp_data: Vec<u8> = Vec::new();
     bmp_data.extend_from_slice(&header);
     bmp_data.extend_from_slice(&info_header);
     bmp_data.extend(&image_data);
-    let mut bmp = File::create_new(path).unwrap();
+    let mut bmp = File::create(path).unwrap();
     bmp.write_all(&bmp_data).expect("Failed to write bmp image");
-    //println!("{:#?}", bmp_data);
-
-    //bmp.write_all(info_header);
 }
 
 // TODO: Write the DECODE method
