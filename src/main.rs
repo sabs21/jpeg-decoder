@@ -526,7 +526,7 @@ enum ReadStage {
 
 fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
-    let path = "./src/images/rainbow.jpg";
+    let path = "./src/images/cat.jpg";
     match std::fs::read(path) {
         Err(x) => println!("path not found: {}", x),
         Ok(bytes) => {
@@ -653,11 +653,6 @@ fn main() {
                                 frame.scans.push(scan);
                                 // TODO: Figure out how to add scanned image data to scan
                             }
-                            else if current_marker_bytes[1] == Some(Markers::DQT) {
-                                frame.quantization_tables.push(QuantizationTable::default());
-                                frame.quantization_tables.last_mut().unwrap().build(&segment_length, &segment_data);
-                            }
-                            
                             else if current_marker_bytes[1] == Some(Markers::EXP) {
                                 let mut exp = ExpandReference::default();
                                 exp.build(&segment_length, &segment_data);
