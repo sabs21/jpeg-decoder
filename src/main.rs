@@ -865,15 +865,15 @@ fn main() {
                         component.push(dequantize_block(&component[block_idx as usize], &qt));
                     }*/
                 for (component_idx, component_total_blocks) in blocks_per_component.iter().enumerate() {
-                    let mut block_idx = 0;
+                    //let mut block_idx = 0;
                     if *component_total_blocks > 0 {
                         let qt: &QuantizationTable = &frame.quantization_tables[frame.frame_header.components[component_idx].quantization_table_selector as usize];
-                        for _ in 0..*component_total_blocks {
-                            match mcu[component_idx].get(block_idx) {
-                                Some(b) => mcu[component_idx][block_idx] = dequantize_block(&b, qt),
+                        for block_idx in 0..*component_total_blocks {
+                            match mcu[component_idx].get(block_idx as usize) {
+                                Some(b) => mcu[component_idx][block_idx as usize] = dequantize_block(&b, qt),
                                 None => mcu[component_idx].push([0; 64])
                             }
-                            block_idx += 1;
+                            //block_idx += 1;
                         }
                     }
                 }
@@ -1705,17 +1705,15 @@ fn bmp_data_from_mcus(mcus: &Vec<Vec<Vec<[i16; 64]>>>, total_components: &u8, im
                             image_data[y * mcu_idx + x] = block[y * 8 + x] as u8;
                         }
                     }
-                    
                 }
             }
         }
     }
     else {
-        for y in 0..*height {
-            let mcu_y = (height - y - 1) / (8 * max_vertical_factor) as u16;
-            //let block_y = (height + 7 / - y - 1) / 8;
+        for y in (0..*height).rev() {
+            let mcu_y = y / (8 * max_vertical_factor) as u16;
             let block_y = y % *max_vertical_factor as u16;
-            let pixel_y = 7 - (y % (8 * max_vertical_factor) as u16);
+            let pixel_y = y % (8 * max_vertical_factor) as u16;
             for x in 0..*width {
                 let mcu_x = x / (8 * max_horizontal_factor) as u16;
                 let block_x = x % *max_horizontal_factor as u16;
@@ -1729,11 +1727,11 @@ fn bmp_data_from_mcus(mcus: &Vec<Vec<Vec<[i16; 64]>>>, total_components: &u8, im
                 image_data.push(mcus[mcu_idx][0][block_idx][pixel_idx] as u8);
             }
             // Account for padding here
-            if width % 4 > 0 {
+            /*if width % 4 > 0 {
                 for _ in 0..width % 4 {
                     image_data.push(0);
                 }
-            }
+            }*/
         }
         /*let total_blocks_x = *width_mcu as usize * *max_horizontal_factor as usize;
         let width = total_blocks_x * 8;
