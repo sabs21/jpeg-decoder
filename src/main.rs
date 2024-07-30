@@ -864,8 +864,8 @@ fn main() {
                     for block_idx in 0..mcu_size {
                         component.push(dequantize_block(&component[block_idx as usize], &qt));
                     }*/
-                let mut block_idx = 0;
                 for (component_idx, component_total_blocks) in blocks_per_component.iter().enumerate() {
+                    let mut block_idx = 0;
                     if *component_total_blocks > 0 {
                         let qt: &QuantizationTable = &frame.quantization_tables[frame.frame_header.components[component_idx].quantization_table_selector as usize];
                         for _ in 0..*component_total_blocks {
@@ -873,7 +873,6 @@ fn main() {
                                 Some(b) => mcu[component_idx][block_idx] = dequantize_block(&b, qt),
                                 None => mcu[component_idx].push([0; 64])
                             }
-                            //mcu[component_idx][block_idx] = dequantize_block(&mcu[component_idx][block_idx], qt);
                             block_idx += 1;
                         }
                     }
