@@ -861,7 +861,8 @@ fn main() {
                     &width_mcu_padding, 
                     &height_mcu_padding, 
                     &max_vertical_factor, 
-                    &max_horizontal_factor
+                    &max_horizontal_factor,
+                    &frame.frame_header.components
                 );
             println!("mcus length after partition: {}", mcus.len());
             //println!("{:#?}", mcus[13]);
@@ -1402,7 +1403,8 @@ fn partition_blocks_to_mcus(
     width_mcu_padding: &u16, 
     height_mcu_padding: &u16, 
     max_vertical_factor: &u8, 
-    max_horizontal_factor: &u8
+    max_horizontal_factor: &u8,
+    frame_components: &Vec<FrameComponent>
 ) -> Vec<Vec<Vec<[i16; 64]>>> {
     let mut mcus: Vec<Vec<Vec<[i16; 64]>>> = Vec::new();
     let mut blocks_idx = 0;
@@ -1416,20 +1418,21 @@ fn partition_blocks_to_mcus(
     for mcu_y in 0..*height_mcu { // height in mcus, not height of an mcu
         for mcu_x in 0..*width_mcu + width_mcu_padding { // width in mcus, not width of an mcu
             let mut mcu: Vec<Vec<[i16; 64]>> = Vec::new();
-            for total_component_blocks in blocks_per_component.iter() {
-                if *total_component_blocks == 0 {
+            for fc in frame_components.iter() {
+                let total_component_blocks = fc.horizontal_sample_factor * fc.vertical_sample_factor;
+                if total_component_blocks == 0 {
                     continue;
                 }
                 let mut component: Vec<[i16; 64]> = Vec::new();
-                for _ in 0..*total_component_blocks {
+                for _ in 0..total_component_blocks {
                     //component.push(blocks[(mcu_idx * total_mcu_blocks + idx) as usize]);
                     component.push(blocks[blocks_idx]);
                     blocks_idx += 1;
                 }
                 // Add placeholder blocks such that all components contain the same
                 // number of blocks
-                if mcu_size - *total_component_blocks as u8 > 0 {
-                    for _ in 0..(mcu_size - *total_component_blocks as u8) {
+                if mcu_size - total_component_blocks as u8 > 0 {
+                    for _ in 0..(mcu_size - total_component_blocks as u8) {
                         component.push([0; 64]);
                     }
                 }
