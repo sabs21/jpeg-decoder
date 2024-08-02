@@ -888,47 +888,13 @@ fn main() {
                     }
                 }
             }*/
-            for mcu in mcus.iter_mut() {
-                /*for (component_idx, component) in mcu.iter_mut().enumerate() {
-                    if let Some(qt) = frame.frame_header.components.get(component_idx).and_then(|c| Some(c.quantization_table_selector)).and_then(|qts| Some(&frame.quantization_tables[qts as usize])) {
-                        for block_idx in 0..mcu_size {
-                            component.push(dequantize_block(&component[block_idx as usize], &qt));
-                        }
-                    }*/
-                    /*let qt: &QuantizationTable = &frame.quantization_tables[frame.frame_header.components[component_idx].quantization_table_selector as usize];
-                    for block_idx in 0..mcu_size {
-                        component.push(dequantize_block(&component[block_idx as usize], &qt));
-                    }*/
-                for fc in &frame.frame_header.components {
-                    let total_component_blocks = fc.horizontal_sample_factor * fc.vertical_sample_factor;
-                    if total_component_blocks == 0 {
-                        continue;
-                    }
-                    let qt: &QuantizationTable = &frame.quantization_tables[fc.quantization_table_selector as usize];
-                    for cb_y in 0..fc.vertical_sample_factor {
-                        for cb_x in 0..fc.horizontal_sample_factor {
-                            // This indexing places blocks into the correct spot within the component
-                            let i: usize = (cb_y * max_horizontal_factor + cb_x) as usize;
-                            mcu[fc.id as usize - 1][i] = dequantize_block(&mcu[fc.id as usize - 1][i], qt);
-                        }
-                    }
-                }
-                /*for (cb_idx, component_total_blocks) in blocks_per_component.iter().enumerate() {
-                    //let mut block_idx = 0;
-                    let i: usize = ((cb_idx % fc.vertical_sample_factor) * fc.horizontal_sample_factor + (cb_idx % fc.horizontal_sample_factor)) as usize;
-                    if *component_total_blocks > 0 {
-                        let qt: &QuantizationTable = &frame.quantization_tables[frame.frame_header.components[component_idx].quantization_table_selector as usize];
-                        //for block_idx in 0..*component_total_blocks {
-                        for block_idx in 0..mcu_size {
-                            match mcu[component_idx].get(block_idx as usize) {
-                                Some(b) => mcu[component_idx][block_idx as usize] = dequantize_block(&b, qt),
-                                None => mcu[component_idx].push([0; 64])
-                            }
-                            //block_idx += 1;
-                        }
-                    }
-                }*/
-            }
+            mcus = dequantize(
+                &mcus,
+                &frame.frame_header.components,
+                &frame.quantization_tables,
+                &max_vertical_factor,
+                &max_horizontal_factor
+            );
             mcus = idct(&mcus);
             println!("mcu length after idct: {}", mcus.len());
             
@@ -1618,6 +1584,40 @@ fn dequantize_block(block: &[i16; 64], qt: &QuantizationTable) -> [i16; 64] {
         dequantized_block[idx] = block[idx] * qt.elements[idx] as i16;
     }
     return dequantized_block
+}
+
+fn dequantize(
+    mcus: &Vec<Vec<Vec<[i16; 64]>>>,
+    frame_components: &Vec<FrameComponent>,
+    quantization_tables: &Vec<QuantizationTable>,
+    max_vertical_factor: &u8,
+    max_horizontal_factor: &u8,
+) -> Vec<Vec<Vec<[i16; 64]>>> {
+    let mut dequantized_mcus: Vec<Vec<Vec<[i16; 64]>>> = Vec::new();
+    for mcu in mcus.iter() {
+        let mut dequantized_mcu: Vec<Vec<[i16; 64]>> = Vec::new();
+        for fc in frame_components.iter() {
+            let total_component_blocks = fc.horizontal_sample_factor * fc.vertical_sample_factor;
+            if total_component_blocks == 0 {
+                continue;
+            }
+            let mut dequantized_component: Vec<[i16; 64]> = Vec::new();
+            for _ in 0..max_horizontal_factor*max_vertical_factor {
+                dequantized_component.push([0; 64]);
+            }
+            let qt: &QuantizationTable = &quantization_tables[fc.quantization_table_selector as usize];
+            for cb_y in 0..fc.vertical_sample_factor {
+                for cb_x in 0..fc.horizontal_sample_factor {
+                    // This indexing places blocks into the correct spot within the component
+                    let i: usize = (cb_y * max_horizontal_factor + cb_x) as usize;
+                    dequantized_component[i] = dequantize_block(&mcu[fc.id as usize - 1][i], qt);
+                }
+            }
+            dequantized_mcu.push(dequantized_component);
+        }
+        dequantized_mcus.push(dequantized_mcu);
+    }
+    return dequantized_mcus;
 }
 
 /*fn dequantize(scan_component: &ScanComponent, quantization_table: &QuantizationTable) -> Vec<Vec<Vec<[i16; 64]>>> {
