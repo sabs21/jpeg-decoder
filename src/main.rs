@@ -825,6 +825,8 @@ fn main() {
             let height_mcu: u16 = height_blocks / max_vertical_factor as u16;
             // I shouldnt need padding because multiplying width_mcu or height_mcu by 8
             // will always be a multiple of 4 for the bmp file
+            let width_blocks_padding: u16 = width_blocks % max_horizontal_factor as u16;
+            let width_height_padding: u16 = width_blocks % max_horizontal_factor as u16;
             let width_mcu_padding: u16 = width_mcu % max_horizontal_factor as u16;
             let height_mcu_padding: u16 = height_mcu % max_vertical_factor as u16;
             let mcu_size = max_horizontal_factor * max_vertical_factor;
@@ -832,10 +834,12 @@ fn main() {
                 decode_huffman_to_blocks(
                     &mut frame, 
                     &blocks_per_component, 
-                    &width_mcu, 
-                    &height_mcu,
-                    &width_mcu_padding,
-                    &height_mcu_padding
+                    &width_blocks, 
+                    &height_blocks,
+                    &width_blocks_padding,
+                    &height_mcu_padding,
+                    &max_vertical_factor, 
+                    &max_horizontal_factor,
                 );
             /*for block in blocks.iter().take(10) {
                 println!();
@@ -856,10 +860,14 @@ fn main() {
                     &blocks, 
                     &blocks_per_component, 
                     &total_mcu_blocks, 
-                    &width_mcu, 
+                    /*&width_mcu, 
                     &height_mcu, 
                     &width_mcu_padding, 
-                    &height_mcu_padding, 
+                    &height_mcu_padding,*/
+                    &width_blocks, 
+                    &height_blocks,
+                    &width_blocks_padding,
+                    &height_mcu_padding,
                     &max_vertical_factor, 
                     &max_horizontal_factor,
                     &frame.frame_header.components
@@ -908,18 +916,79 @@ fn main() {
             }
             mcus = idct(&mcus);
             println!("mcu length after idct: {}", mcus.len());
+            
+            mcus = upscale_two(
+                &mcus, 
+                &max_vertical_factor, 
+                &max_horizontal_factor,
+                &frame.frame_header.components
+            );
+
             mcus = 
                 ycbcr_to_rgb_mcu(
                     &mcus,
-                    &width_mcu, 
+                    /*&width_mcu, 
                     &height_mcu,
                     &width_mcu_padding,
+                    &height_mcu_padding,*/
+                    &width_blocks, 
+                    &height_blocks,
+                    &width_blocks_padding,
                     &height_mcu_padding,
                     &frame.frame_header.total_components,
                     &((max_vertical_factor * max_horizontal_factor) as usize),
+                    &max_vertical_factor, 
+                    &max_horizontal_factor,
                     &frame.frame_header.components
                 );
             
+            // Here is where we upscale components which are not at full resolution
+            /*mcus = upscale_two(
+                &mcus, 
+                &max_vertical_factor, 
+                &max_horizontal_factor,
+                &frame.frame_header.components
+            );*/
+            println!("Before upscale");
+            for (mcu_idx, mcu) in mcus.iter().take(4).enumerate() {
+                println!("========== mcu {} ==========", mcu_idx);
+                for (c_idx, component) in mcu.iter().enumerate() {
+                    println!("component {}", c_idx);
+                    for (b_idx, block) in component.iter().enumerate() {
+                        println!("block {}", b_idx);
+                        for (byte_idx, byte) in block.iter().enumerate() {
+                            if byte_idx % 8 == 0 {
+                                println!();
+                            }
+                            print!("{},\t", byte);
+                        }
+                    }
+                }
+            }
+
+            /*mcus = upscale_two(
+                &mcus, 
+                &max_vertical_factor, 
+                &max_horizontal_factor,
+                &frame.frame_header.components
+            );*/
+            println!("After upscale");
+            for (mcu_idx, mcu) in mcus.iter().take(4).enumerate() {
+                println!("========== mcu {} ==========", mcu_idx);
+                for (c_idx, component) in mcu.iter().enumerate() {
+                    println!("component {}", c_idx);
+                    for (b_idx, block) in component.iter().enumerate() {
+                        println!("block {}", b_idx);
+                        for (byte_idx, byte) in block.iter().enumerate() {
+                            if byte_idx % 8 == 0 {
+                                println!();
+                            }
+                            print!("{},\t", byte);
+                        }
+                    }
+                }
+            }
+
             //let total_mcus: usize = (width_mcu * height_mcu) as usize;
             //let image_size: usize = total_mcus * 64 * max_horizontal_factor as usize * max_vertical_factor as usize * 3;
             let image_size: usize = 
@@ -1352,16 +1421,25 @@ fn decode_block(
 fn decode_huffman_to_blocks(
     frame: &Frame, 
     blocks_per_component: &[u16; 4], 
-    width_mcu: &u16, 
+    /*width_mcu: &u16, 
     height_mcu: &u16,
     padded_width_mcu: &u16,
-    padded_height_mcu: &u16
+    padded_height_mcu: &u16*/
+    width_blocks: &u16,
+    height_blocks: &u16,
+    padded_width_blocks: &u16,
+    padded_height_blocks: &u16,
+    max_vertical_factor: &u8,
+    max_horizontal_factor: &u8
 ) -> Vec<[i16; 64]> {
     // The dimensions of a non-interleaved mcu is 8x8 (the same as a data unit)
     // An interleaved mcu can contain one or more data units per component.
     let mut blocks: Vec<[i16; 64]> = Vec::new();
-    let total_mcus: u16 = (width_mcu + padded_width_mcu) * height_mcu;
+    //let total_mcus: u16 = (width_mcu + padded_width_mcu) * height_mcu;
+    let total_blocks: u16 = (width_blocks + padded_width_blocks) * height_blocks;
+    let total_mcus: u16 = ((width_blocks + padded_width_blocks) / *max_horizontal_factor as u16) * (height_blocks / *max_vertical_factor as u16);
     println!("total_mcus: {}", total_mcus);
+    println!("total_blocks: {}", total_blocks);
     for scan in frame.scans.iter() {
         let mut prev_dc: Vec<i16> = Vec::new(); 
         for _ in 0..frame.frame_header.total_components {
@@ -1387,6 +1465,7 @@ fn decode_huffman_to_blocks(
                     prev_dc[scan_component.id as usize - 1] = block[0];
                     blocks.push(block);
                 }
+                //block_idx += blocks_per_component[scan_component.id as usize - 1];
             }
             mcu_idx += 1;
         }
@@ -1398,10 +1477,14 @@ fn partition_blocks_to_mcus(
     blocks: &Vec<[i16; 64]>, 
     blocks_per_component: &[u16; 4], 
     total_mcu_blocks: &u16, 
-    width_mcu: &u16, 
+    /*width_mcu: &u16, 
     height_mcu: &u16, 
     width_mcu_padding: &u16, 
-    height_mcu_padding: &u16, 
+    height_mcu_padding: &u16,*/
+    width_blocks: &u16, 
+    height_blocks: &u16, 
+    width_blocks_padding: &u16, 
+    height_blocks_padding: &u16,
     max_vertical_factor: &u8, 
     max_horizontal_factor: &u8,
     frame_components: &Vec<FrameComponent>
@@ -1410,40 +1493,46 @@ fn partition_blocks_to_mcus(
     let mut blocks_idx = 0;
     //let mcu_padded_width = *width_mcu % *max_horizontal_factor as u16;
     //let mcu_padded_height = *height_mcu % *max_vertical_factor as u16;
-    println!("padding width: {} | padding height: {}", *width_mcu % *max_horizontal_factor as u16, *height_mcu % *max_vertical_factor as u16);
+    //println!("padding width: {} | padding height: {}", *width_mcu % *max_horizontal_factor as u16, *height_mcu % *max_vertical_factor as u16);
     //if width_mcu % *max_horizontal_factor as u16 != 0 {
     //    mcu_padded_width += *width_mcu % *max_horizontal_factor as u16;
     //}
     let mcu_size = max_vertical_factor * max_horizontal_factor;
-    for mcu_y in 0..*height_mcu { // height in mcus, not height of an mcu
-        for mcu_x in 0..*width_mcu + width_mcu_padding { // width in mcus, not width of an mcu
-            let mut mcu: Vec<Vec<[i16; 64]>> = Vec::new();
-            for fc in frame_components.iter() {
-                let total_component_blocks = fc.horizontal_sample_factor * fc.vertical_sample_factor;
-                if total_component_blocks == 0 {
-                    continue;
-                }
-                let mut component: Vec<[i16; 64]> = Vec::new();
-                for _ in 0..total_component_blocks {
-                    //component.push(blocks[(mcu_idx * total_mcu_blocks + idx) as usize]);
-                    component.push(blocks[blocks_idx]);
-                    blocks_idx += 1;
-                }
-                // Add placeholder blocks such that all components contain the same
-                // number of blocks
-                if mcu_size - total_component_blocks as u8 > 0 {
-                    for _ in 0..(mcu_size - total_component_blocks as u8) {
-                        component.push([0; 64]);
-                    }
-                }
-                /*for idx in *total_blocks..mcu_size as u16 {
-                    //println!("idx: {}", idx);
-                    component.push(blocks[(mcu_idx * total_mcu_blocks + idx) as usize]);
-                }*/
-                mcu.push(component);
+    //for mcu_y in 0..*height_blocks { // height in mcus, not height of an mcu
+    //    for mcu_x in 0..*width_blocks + width_blocks_padding { // width in mcus, not width of an mcu
+    
+    let total_mcus: u16 = ((width_blocks + width_blocks_padding) / *max_horizontal_factor as u16) * (height_blocks / *max_vertical_factor as u16);
+    let mut mcu_idx = 0;
+    while mcu_idx < total_mcus {
+        let mut mcu: Vec<Vec<[i16; 64]>> = Vec::new();
+        for fc in frame_components.iter() {
+            let total_component_blocks = fc.horizontal_sample_factor * fc.vertical_sample_factor;
+            println!("frame_component_id: {} | total_component_blocks: {}", fc.id, total_component_blocks);
+            if total_component_blocks == 0 {
+                continue;
             }
-            mcus.push(mcu);
+            let mut component: Vec<[i16; 64]> = Vec::new();
+            for _ in 0..total_component_blocks {
+                //component.push(blocks[(mcu_idx * total_mcu_blocks + idx) as usize]);
+                component.push(blocks[blocks_idx]);
+                blocks_idx += 1;
+            }
+            // Add placeholder blocks such that all components contain the same
+            // number of blocks
+            /*if mcu_size - total_component_blocks as u8 > 0 {
+                for _ in 0..(mcu_size - total_component_blocks as u8) {
+                    component.push([0; 64]);
+                }
+            }*/
+            /*for idx in *total_blocks..mcu_size as u16 {
+                //println!("idx: {}", idx);
+                component.push(blocks[(mcu_idx * total_mcu_blocks + idx) as usize]);
+            }*/
+            mcu.push(component);
         }
+        mcus.push(mcu);
+        mcu_idx += 1;
+    }
         /*if *width_mcu_padding > 0 {
             // Adds an empty column for padding
             for _ in 0..mcu_padded_width {
@@ -1458,7 +1547,6 @@ fn partition_blocks_to_mcus(
                 mcus.push(mcu);
             }
         }*/
-    }
     // test output by printing just one more mcu
     /*let mut mcu: Vec<Vec<[i16; 64]>> = Vec::new();
     for _ in blocks_per_component.iter() {
@@ -1625,6 +1713,10 @@ fn idct_block(block: &[i16; 64]) -> [i16; 64] {
 // The result is an upscaled version of a block based on scaling factors.
 fn upscale_block(block: &[i16; 64], horizontal_scaling_factor: usize, vertical_scaling_factor: usize) -> Vec<[i16; 64]> {
     let mut upscaled: Vec<[i16; 64]> = Vec::new();
+    if horizontal_scaling_factor * vertical_scaling_factor <= 1 {
+        upscaled.push(*block);
+        return upscaled
+    }
     for _ in 0..vertical_scaling_factor * horizontal_scaling_factor {
         upscaled.push([0; 64]);
     }
@@ -1669,9 +1761,71 @@ fn upscale_mcus(mcus: &Vec<Vec<[i16; 64]>>, horizontal_scaling_factor: usize, ve
     upscaled_mcus
 }
 
-fn ycbcr_to_rgb_mcu(mcus: &Vec<Vec<Vec<[i16; 64]>>>, width_mcu: &u16, height_mcu: &u16, width_mcu_padding: &u16, height_mcu_padding: &u16, total_components: &u8, mcu_size: &usize, frame_components: &Vec<FrameComponent>) -> Vec<Vec<Vec<[i16; 64]>>> {
+fn upscale_two(
+    mcus: &Vec<Vec<Vec<[i16; 64]>>>, 
+    max_vertical_factor: &u8, 
+    max_horizontal_factor: &u8,
+    frame_components: &Vec<FrameComponent>
+) -> Vec<Vec<Vec<[i16; 64]>>> {
+    let mut upscaled_mcus: Vec<Vec<Vec<[i16; 64]>>> = Vec::new();
+    let mcu_size = max_horizontal_factor * max_vertical_factor;
+    for mcu in mcus.iter() {
+        let mut upscaled_mcu: Vec<Vec<[i16; 64]>> = Vec::new();
+        for fc in frame_components.iter() {
+            let total_component_blocks = fc.horizontal_sample_factor * fc.vertical_sample_factor;
+            println!("frame_component_id: {} | total_component_blocks: {}", fc.id, total_component_blocks);
+            if total_component_blocks == 0 {
+                continue;
+            }
+            if total_component_blocks == 1 {
+                /*let mut upscaled_component: Vec<[i16; 64]> = Vec::new();
+                for _ in 0..mcu_size {
+                    upscaled_component.push([0; 64]);
+                }*/
+                //for cb_idx in 0..total_component_blocks {
+                    
+                //}
+                upscaled_mcu.push(upscale_block(&mcu[fc.id as usize - 1][0], *max_vertical_factor as usize, *max_horizontal_factor as usize));
+            }
+            else {
+                upscaled_mcu.push(mcu[fc.id as usize - 1].clone());
+            }
+            /*let x_scale = (*max_horizontal_factor - fc.horizontal_sample_factor) as usize + 1;
+            let y_scale = (*max_vertical_factor - fc.vertical_sample_factor) as usize + 1;
+            for cb_idx in 0..total_component_blocks {
+                let upscaled = upscale_block(&mcu[fc.id as usize - 1][cb_idx as usize], x_scale, y_scale);
+                let mut ub_idx: usize = 0;
+                for y in 0..y_scale {
+                    for x in 0..x_scale {
+                        let idx: usize = cb_idx as usize + (y * y_scale as usize) + x;
+                        println!("idx: {} | y: {} | x: {} | y_scale: {} | x_scale: {}", idx, y, x, y_scale, x_scale);
+                        upscaled_component[idx] = upscaled[ub_idx];
+                        ub_idx += 1;
+                    }
+                }
+            }*/
+            //upscaled_mcu.push(upscaled_component);
+        }
+        upscaled_mcus.push(upscaled_mcu);
+    }
+    return upscaled_mcus
+}
+
+fn ycbcr_to_rgb_mcu(
+    mcus: &Vec<Vec<Vec<[i16; 64]>>>, 
+    width_blocks: &u16, 
+    height_blocks: &u16, 
+    width_blocks_padding: &u16, 
+    height_blocks_padding: &u16, 
+    total_components: &u8, 
+    mcu_size: &usize, 
+    max_vertical_factor: &u8, 
+    max_horizontal_factor: &u8,
+    frame_components: &Vec<FrameComponent>
+) -> Vec<Vec<Vec<[i16; 64]>>> {
     let mut rgb_mcus: Vec<Vec<Vec<[i16; 64]>>> = Vec::new();
-    let total_mcus: u16 = height_mcu * (width_mcu + width_mcu_padding);
+    //let total_mcus: u16 = height_mcu * (width_mcu + width_mcu_padding);
+    let total_mcus: u16 = ((width_blocks + width_blocks_padding) / *max_horizontal_factor as u16) * (height_blocks / *max_vertical_factor as u16);
     // Allocate memory for array access on conversion
     for _ in 0..total_mcus {
         let mut fresh_components: Vec<Vec<[i16; 64]>> = Vec::new();
