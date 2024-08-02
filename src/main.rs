@@ -899,8 +899,23 @@ fn main() {
                     for block_idx in 0..mcu_size {
                         component.push(dequantize_block(&component[block_idx as usize], &qt));
                     }*/
-                for (component_idx, component_total_blocks) in blocks_per_component.iter().enumerate() {
+                for fc in &frame.frame_header.components {
+                    let total_component_blocks = fc.horizontal_sample_factor * fc.vertical_sample_factor;
+                    if total_component_blocks == 0 {
+                        continue;
+                    }
+                    let qt: &QuantizationTable = &frame.quantization_tables[fc.quantization_table_selector as usize];
+                    for cb_y in 0..fc.vertical_sample_factor {
+                        for cb_x in 0..fc.horizontal_sample_factor {
+                            // This indexing places blocks into the correct spot within the component
+                            let i: usize = (cb_y * max_horizontal_factor + cb_x) as usize;
+                            mcu[fc.id as usize - 1][i] = dequantize_block(&mcu[fc.id as usize - 1][i], qt);
+                        }
+                    }
+                }
+                /*for (cb_idx, component_total_blocks) in blocks_per_component.iter().enumerate() {
                     //let mut block_idx = 0;
+                    let i: usize = ((cb_idx % fc.vertical_sample_factor) * fc.horizontal_sample_factor + (cb_idx % fc.horizontal_sample_factor)) as usize;
                     if *component_total_blocks > 0 {
                         let qt: &QuantizationTable = &frame.quantization_tables[frame.frame_header.components[component_idx].quantization_table_selector as usize];
                         //for block_idx in 0..*component_total_blocks {
@@ -912,7 +927,7 @@ fn main() {
                             //block_idx += 1;
                         }
                     }
-                }
+                }*/
             }
             mcus = idct(&mcus);
             println!("mcu length after idct: {}", mcus.len());
@@ -1506,18 +1521,20 @@ fn partition_blocks_to_mcus(
                 continue;
             }
             let mut component: Vec<[i16; 64]> = Vec::new();
-            for _ in 0..total_component_blocks {
-                //component.push(blocks[(mcu_idx * total_mcu_blocks + idx) as usize]);
-                component.push(blocks[blocks_idx]);
-                blocks_idx += 1;
-            }
             // Add placeholder blocks such that all components contain the same
             // number of blocks
-            if mcu_size - total_component_blocks as u8 > 0 {
-                for _ in 0..(mcu_size - total_component_blocks as u8) {
-                    component.push([0; 64]);
+            for _ in 0..mcu_size {
+                component.push([0; 64]);
+            }
+            for cb_y in 0..fc.vertical_sample_factor {
+                for cb_x in 0..fc.horizontal_sample_factor {
+                    // This indexing places blocks into the correct spot within the component
+                    let i: usize = (cb_y * max_horizontal_factor + cb_x) as usize;
+                    component[i] = blocks[blocks_idx];
+                    blocks_idx += 1;
                 }
             }
+            
             /*for idx in *total_blocks..mcu_size as u16 {
                 //println!("idx: {}", idx);
                 component.push(blocks[(mcu_idx * total_mcu_blocks + idx) as usize]);
@@ -1767,11 +1784,62 @@ fn upscale_two(
         let mut upscaled_mcu: Vec<Vec<[i16; 64]>> = Vec::new();
         for fc in frame_components.iter() {
             let total_component_blocks = fc.horizontal_sample_factor * fc.vertical_sample_factor;
-            println!("frame_component_id: {} | total_component_blocks: {}", fc.id, total_component_blocks);
             if total_component_blocks == 0 {
                 continue;
             }
-            if total_component_blocks == 1 {
+            let mut upscaled_component: Vec<[i16; 64]> = Vec::new();
+            for _ in 0..mcu_size {
+                upscaled_component.push([0; 64]);
+            }
+            println!("frame_component_id: {} | total_component_blocks: {}", fc.id, total_component_blocks);
+            let x_scale = (*max_horizontal_factor - fc.horizontal_sample_factor) as usize + 1; 
+            let y_scale = (*max_vertical_factor - fc.vertical_sample_factor) as usize + 1;
+            let mut i = 0;
+            for ub_y in 0..fc.vertical_sample_factor as usize {
+                for ub_x in 0..fc.horizontal_sample_factor as usize {
+                    //let i = ub_y * fc.horizontal_sample_factor as usize + ub_x;
+                    let upscaled_blocks: Vec<[i16; 64]> = upscale_block(&mcu[fc.id as usize - 1][i], x_scale, y_scale);
+                    //for cb_y in 0..fc.vertical_sample_factor as usize {
+                        //for cb_x in 0..fc.horizontal_sample_factor as usize {
+                            //let i: usize = cb_y * fc.horizontal_sample_factor as usize + cb_x;
+                    for (ub_idx, ub) in upscaled_blocks.iter().enumerate() {
+                        //let ui: usize = (((i + ub_idx) / fc.horizontal_sample_factor as usize) * fc.vertical_sample_factor as usize) + ((i + ub_idx) % fc.horizontal_sample_factor as usize);
+                        //let ui: usize = i + (ub_idx * fc.vertical_sample_factor as usize);
+                        let ui: usize = i + ub_idx * fc.vertical_sample_factor as usize;
+                        //let ui: usize = i
+                        //upscaled_component[i + 
+                        println!("i: {} | ui: {}", i, ui);
+                        upscaled_component[ui] = *ub;
+                    }
+                    i += 1;
+                            /*for ub_y in 0..y_scale {
+                                for ub_x in 0..x_scale {
+                                    let ui: usize = i + ub_idx;
+                                    println!("i: {} | ui: {}", i, ui);
+                                    upscaled_component[ui] = ub;
+                                }
+                            }*/
+                        //}
+                    //}
+                }
+            }
+            upscaled_mcu.push(upscaled_component);
+            /*for cb_idx in 0..total_component_blocks {
+                // Note: There will only be a total of total_component_blocks in the
+                // The prefilled component block vector now respects the order of the blocks
+                //let upscaled_blocks: Vec<[i16; 64]> = upscale_block(&mcu[fc.id as usize - 1][cb_idx], x_scale, y_scale);
+                let i: usize = ((cb_idx % fc.vertical_sample_factor) * fc.horizontal_sample_factor + (cb_idx % fc.horizontal_sample_factor)) as usize;
+                let upscaled_blocks: Vec<[i16; 64]> = upscale_block(&mcu[fc.id as usize - 1][i], x_scale, y_scale);
+                for (ub_idx, ub) in upscaled_blocks.iter().enumerate() {
+                    //let ui: usize = (((i + ub_idx) / fc.horizontal_sample_factor as usize) * fc.vertical_sample_factor as usize) + ((i + ub_idx) % fc.horizontal_sample_factor as usize);
+                    //let ui: usize = i + (ub_idx * fc.vertical_sample_factor as usize);
+                    let ui: usize = i + ub_idx;
+                    //upscaled_component[i + 
+                    println!("i: {} | ui: {}", i, ui);
+                    upscaled_component[ui] = *ub;
+                }
+            }*/
+            /*if total_component_blocks == 1 {
                 /*let mut upscaled_component: Vec<[i16; 64]> = Vec::new();
                 for _ in 0..mcu_size {
                     upscaled_component.push([0; 64]);
@@ -1783,7 +1851,7 @@ fn upscale_two(
             }
             else {
                 upscaled_mcu.push(mcu[fc.id as usize - 1].clone());
-            }
+            }*/
             /*let x_scale = (*max_horizontal_factor - fc.horizontal_sample_factor) as usize + 1;
             let y_scale = (*max_vertical_factor - fc.vertical_sample_factor) as usize + 1;
             for cb_idx in 0..total_component_blocks {
@@ -1798,7 +1866,6 @@ fn upscale_two(
                     }
                 }
             }*/
-            //upscaled_mcu.push(upscaled_component);
         }
         upscaled_mcus.push(upscaled_mcu);
     }
