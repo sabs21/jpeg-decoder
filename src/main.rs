@@ -488,9 +488,9 @@ fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
     let path = "./src/images/guy.jpg";
     match std::fs::read(path) {
-        Err(x) => println!("path not found: {}", x),
+        Err(x) => panic!("path not found: {}", x),
         Ok(bytes) => {
-            println!("Scanning in image...");
+            println!("Scanning in {}...", path.to_string());
             let mut stage = ReadStage::Marker;
             let mut current_marker_bytes: [Option<u8>; 2] = [None;2]; // Identify segment to construct based on marker
             let mut segment_length_bytes: [Option<u8>; 2] = [None;2]; // Used for bounds checking
@@ -1079,7 +1079,6 @@ fn partition_blocks_to_mcus(
         let mut mcu: Vec<Vec<[i16; 64]>> = Vec::new();
         for fc in frame_components.iter() {
             let total_component_blocks = fc.horizontal_sample_factor * fc.vertical_sample_factor;
-            println!("frame_component_id: {} | total_component_blocks: {}", fc.id, total_component_blocks);
             if total_component_blocks == 0 {
                 continue;
             }
