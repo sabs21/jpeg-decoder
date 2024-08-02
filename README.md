@@ -1,5 +1,5 @@
 # JPEG Decoder
-Decodes JPEG images that use Baseline Discrete Cosine Transform (DCT).
+Decodes JPEG images that use Baseline Discrete Cosine Transform (DCT). Chroma subsampling is supported, although it's only been tested for quarter and half resolution color components.
 
 Currently a work in progress:
-- Handling baseline jpeg images with color channels containing the same resolution.
+- Fixing a deep fried effect from color scaling inaccuracy
