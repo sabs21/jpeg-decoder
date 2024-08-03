@@ -926,7 +926,8 @@ fn decode_block(
     prev_dc: &i16,
     bit_reader: &mut BitReader,
     dc: &HuffmanTable,
-    ac: &HuffmanTable
+    ac: &HuffmanTable,
+    zigzag_map: &[usize; 64]
 ) -> [i16; 64] {
     let mut data_block: [i16; 64] = [0; 64];
     let dc_coeff_length = 
@@ -948,16 +949,6 @@ fn decode_block(
     // We add the previous dc value here, refered to as the predictor.
     data_block[0] = dc_coeff + prev_dc;
     let mut ac_counter: usize = 1;
-    let zigzag: [usize; 64] = [
-        0,  1,  8,  16, 9,  2,  3,  10,
-        17, 24, 32, 25, 18, 11, 4,  5,
-        12, 19, 26, 33, 40, 48, 41, 34,
-        27, 20, 13, 6,  7,  14, 21, 28,
-        35, 42, 49, 56, 57, 50, 43, 36,
-        29, 22, 15, 23, 30, 37, 44, 51,
-        58, 59, 52, 45, 38, 31, 39, 46,
-        53, 60, 61, 54, 47, 55, 62, 63
-    ];
     while ac_counter < 64 {
         let ac_symbol = 
             next_symbol(bit_reader, ac)
@@ -995,7 +986,7 @@ fn decode_block(
             if ac_coeff < (1 << (ac_coeff_length - 1)) {
                 ac_coeff -= (1 << ac_coeff_length) - 1;
             }
-            data_block[zigzag[ac_counter]] = ac_coeff;
+            data_block[zigzag_map[ac_counter]] = ac_coeff;
             ac_counter += 1;
         }
     }
@@ -1016,6 +1007,16 @@ fn decode_huffman_to_blocks(
     // An interleaved mcu can contain one or more data units per component.
     let mut blocks: Vec<[i16; 64]> = Vec::new();
     let total_mcus: u16 = ((width_blocks + padded_width_blocks) / *max_horizontal_factor as u16) * ((height_blocks + padded_height_blocks) / *max_vertical_factor as u16);
+    let zigzag: [usize; 64] = [
+        0,  1,  8,  16, 9,  2,  3,  10,
+        17, 24, 32, 25, 18, 11, 4,  5,
+        12, 19, 26, 33, 40, 48, 41, 34,
+        27, 20, 13, 6,  7,  14, 21, 28,
+        35, 42, 49, 56, 57, 50, 43, 36,
+        29, 22, 15, 23, 30, 37, 44, 51,
+        58, 59, 52, 45, 38, 31, 39, 46,
+        53, 60, 61, 54, 47, 55, 62, 63
+    ];
     for scan in frame.scans.iter() {
         let mut prev_dc: Vec<i16> = Vec::new(); 
         for _ in 0..frame.frame_header.total_components {
@@ -1036,7 +1037,8 @@ fn decode_huffman_to_blocks(
                             &prev_dc[scan_component.id as usize - 1],
                             &mut bit_reader,
                             &frame.dc_huffman_tables.get(usize::from(scan_component.dc_entropy_table_dest)).unwrap(),
-                            &frame.ac_huffman_tables.get(usize::from(scan_component.ac_entropy_table_dest)).unwrap()
+                            &frame.ac_huffman_tables.get(usize::from(scan_component.ac_entropy_table_dest)).unwrap(),
+                            &zigzag
                         );
                     prev_dc[scan_component.id as usize - 1] = block[0];
                     blocks.push(block);
