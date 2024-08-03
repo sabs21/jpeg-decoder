@@ -929,29 +929,24 @@ fn decode_block(
     ac: &HuffmanTable
 ) -> [i16; 64] {
     let mut data_block: [i16; 64] = [0; 64];
-    match next_symbol(bit_reader, dc) {
-        Some(dc_symbol) => {
-            let coeff_length: u8 = dc_symbol;
-            if coeff_length > 11 {
-                panic!("(decode_block) DC coefficient cannot have length greater than 11.")
-            }
-            match bit_reader.next_bits(&coeff_length) {
-                Some(coeff_unsigned) => {
-                    // Conversion to signed coefficient (refer to table H.2 in the spec)
-                    let mut coeff: i16 = coeff_unsigned.try_into().unwrap();
-                    if coeff_length > 0 && coeff < (1 << (coeff_length - 1)) {
-                        coeff -= (1 << coeff_length) - 1;
-                    }
-                    // We add the previous dc value here, refered to as the predictor.
-                    data_block[0] = coeff + prev_dc;
-                },
-                None => {
-                    panic!("Invalid DC coefficient");
-                }
-            }
-        },
-        None => panic!("DC: Could not find symbol in huffman table ID {}.", scan_component.dc_entropy_table_dest)
+    let dc_coeff_length = 
+        next_symbol(bit_reader, dc)
+            .expect(format!("Could not find symbol in DC huffman table {}.", scan_component.dc_entropy_table_dest).as_str());
+    if dc_coeff_length > 11 {
+        panic!("(decode_block) DC coefficient cannot have length greater than 11.")
     }
+    // Coefficient initially is unsigned
+    let dc_coeff_unsigned = 
+        bit_reader
+            .next_bits(&dc_coeff_length)
+            .expect("Invalid DC coefficient");
+    // Convert to signed coefficient (refer to table H.2 in the spec)
+    let mut dc_coeff: i16 = dc_coeff_unsigned as i16;
+    if dc_coeff_length > 0 && dc_coeff < (1 << (dc_coeff_length - 1)) {
+        dc_coeff -= (1 << dc_coeff_length) - 1;
+    }
+    // We add the previous dc value here, refered to as the predictor.
+    data_block[0] = dc_coeff + prev_dc;
     let mut ac_counter: usize = 1;
     let zigzag: [usize; 64] = [
         0,  1,  8,  16, 9,  2,  3,  10,
@@ -964,51 +959,44 @@ fn decode_block(
         53, 60, 61, 54, 47, 55, 62, 63
     ];
     while ac_counter < 64 {
-        match next_symbol(bit_reader, ac) {
-            Some(ac_symbol) => {
-                if ac_symbol == 0x00 {
-                    // 0x00 is a special symbol which tells us to fill the
-                    // rest of the mcu with zeros
-                    //
-                    // We've already initialized mcu with all zeros,
-                    // so we stop setting any more non-zero values
-                    // by returning the mcu.
-                    return data_block
-                }
-                let mut preceeding_zeros: usize = usize::from(ac_symbol >> 4);
-                if ac_symbol == 0xf0 {
-                    preceeding_zeros = 16;
-                }
-                if ac_counter + preceeding_zeros >= 64 {
-                    panic!("(decode_block) Total preceeding zeros exceeds bounds of current data block");
-                }
-                // We have already initialized the mcu array with zeros, so we
-                // "add" zeros to the mcu by simply adding to the ac_counter.
-                ac_counter += preceeding_zeros;
-                let coeff_length: u8 = ac_symbol & 0x0f;
-                if coeff_length > 10 {
-                    panic!("(decode_block) AC coefficient length cannot exceed 10.");
-                }
-                else if coeff_length > 0 {
-                    match bit_reader.next_bits(&coeff_length) {
-                        Some(coeff_unsigned) => {
-                            // Conversion to signed coefficient (refer to table H.2 in the spec)
-                            let mut coeff: i16 = coeff_unsigned.try_into().unwrap();
-                            if coeff < (1 << (coeff_length - 1)) {
-                                coeff -= (1 << coeff_length) - 1;
-                            }
-                            data_block[zigzag[ac_counter]] = coeff;
-                            ac_counter += 1;
-                        },
-                        None => {
-                            panic!("Invalid AC coefficient in huffman table ID {}", scan_component.ac_entropy_table_dest)
-                        }
-                    }
-                }
-            },
-            None => {
-                println!("AC {}: Could not find symbol in huffman table.", ac_counter);
+        let ac_symbol = 
+            next_symbol(bit_reader, ac)
+                .expect(format!("Could not find symbol in AC huffman table {}.", scan_component.ac_entropy_table_dest).as_str());
+        if ac_symbol == 0x00 {
+            // 0x00 is a special symbol which tells us to fill the
+            // rest of the mcu with zeros
+            //
+            // We've already initialized mcu with all zeros,
+            // so we stop setting any more non-zero values
+            // by returning the mcu.
+            return data_block
+        }
+        let mut preceeding_zeros: usize = usize::from(ac_symbol >> 4);
+        if ac_symbol == 0xf0 {
+            preceeding_zeros = 16;
+        }
+        if ac_counter + preceeding_zeros >= 64 {
+            panic!("(decode_block) Total preceeding zeros exceeds bounds of current data block");
+        }
+        // We have already initialized the mcu array with zeros, so we
+        // "add" zeros to the mcu by simply adding to the ac_counter.
+        ac_counter += preceeding_zeros;
+        let ac_coeff_length: u8 = ac_symbol & 0x0f;
+        if ac_coeff_length > 10 {
+            panic!("(decode_block) AC coefficient length cannot exceed 10.");
+        }
+        else if ac_coeff_length > 0 {
+            let ac_coeff_unsigned = 
+                bit_reader
+                    .next_bits(&ac_coeff_length) 
+                    .expect(format!("AC coefficient length exceeds the end of bitstream. Coefficient length: {}", ac_coeff_length).as_str());
+            // Convert to signed coefficient (refer to table H.2 in the spec)
+            let mut ac_coeff: i16 = ac_coeff_unsigned.try_into().unwrap();
+            if ac_coeff < (1 << (ac_coeff_length - 1)) {
+                ac_coeff -= (1 << ac_coeff_length) - 1;
             }
+            data_block[zigzag[ac_counter]] = ac_coeff;
+            ac_counter += 1;
         }
     }
     return data_block
