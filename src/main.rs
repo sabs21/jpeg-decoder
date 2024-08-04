@@ -746,10 +746,6 @@ fn main() {
                     max_horizontal_factor = component.horizontal_sample_factor;
                 }
             }
-            let mut blocks_per_component: [u16; 4] = [0; 4];
-            for (idx, component) in frame.frame_header.components.iter().enumerate() {
-                blocks_per_component[idx] = u16::from(component.vertical_sample_factor * component.horizontal_sample_factor);
-            }
             let width = frame.frame_header.total_horizontal_lines;
             let height = frame.frame_header.total_vertical_lines;
             let width_blocks = (width + 7) / 8;
@@ -759,7 +755,6 @@ fn main() {
             let blocks: Vec<[i16; 64]> = 
                 decode_huffman_to_blocks(
                     &mut frame, 
-                    &blocks_per_component, 
                     &width_blocks, 
                     &height_blocks,
                     &width_blocks_padding,
@@ -1000,7 +995,6 @@ fn decode_block(
 
 fn decode_huffman_to_blocks(
     frame: &Frame, 
-    blocks_per_component: &[u16; 4], 
     width_blocks: &u16,
     height_blocks: &u16,
     padded_width_blocks: &u16,
@@ -1022,6 +1016,10 @@ fn decode_huffman_to_blocks(
         58, 59, 52, 45, 38, 31, 39, 46,
         53, 60, 61, 54, 47, 55, 62, 63
     ];
+    let mut blocks_per_component: [u16; 4] = [0; 4];
+    for (idx, component) in frame.frame_header.components.iter().enumerate() {
+        blocks_per_component[idx] = u16::from(component.vertical_sample_factor * component.horizontal_sample_factor);
+    }
     for scan in frame.scans.iter() {
         let mut prev_dc: Vec<i16> = Vec::new(); 
         for _ in 0..frame.frame_header.total_components {
@@ -1031,21 +1029,22 @@ fn decode_huffman_to_blocks(
         let mut mcu_idx = 0;
         while mcu_idx < total_mcus {
             let restart: bool = frame.restart_interval.as_ref().is_some_and(|ri| mcu_idx % ri.interval == 0);
-            for scan_component in scan.scan_header.components.iter() {
+            for sc in scan.scan_header.components.iter() {
+                let cid: usize = sc.id as usize - 1;
                 if restart {
-                    prev_dc[scan_component.id as usize - 1] = 0;
+                    prev_dc[cid] = 0;
                     bit_reader.align();
                 }
-                for _ in 0..blocks_per_component[(scan_component.id - 1) as usize] {
+                for _ in 0..blocks_per_component[cid] {
                     let block = decode_block(
-                            scan_component,
-                            &prev_dc[scan_component.id as usize - 1],
+                            sc,
+                            &prev_dc[cid],
                             &mut bit_reader,
-                            &frame.dc_huffman_tables.get(usize::from(scan_component.dc_entropy_table_dest)).unwrap(),
-                            &frame.ac_huffman_tables.get(usize::from(scan_component.ac_entropy_table_dest)).unwrap(),
+                            &frame.dc_huffman_tables.get(sc.dc_entropy_table_dest as usize).unwrap(),
+                            &frame.ac_huffman_tables.get(sc.ac_entropy_table_dest as usize).unwrap(),
                             &zigzag
                         );
-                    prev_dc[scan_component.id as usize - 1] = block[0];
+                    prev_dc[cid] = block[0];
                     blocks.push(block);
                 }
             }
