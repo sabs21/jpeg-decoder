@@ -783,16 +783,8 @@ fn main() {
                 &mcus,
                 &frame.frame_header.components,
                 &frame.quantization_tables,
-                &max_vertical_factor,
-                &max_horizontal_factor
             );
             mcus = idct(&mcus);
-            mcus = upscale(
-                &mcus, 
-                &max_vertical_factor, 
-                &max_horizontal_factor,
-                &frame.frame_header.components
-            );
             mcus = upscale(
                 &mcus, 
                 &max_vertical_factor, 
@@ -1110,28 +1102,16 @@ fn dequantize(
     mcus: &Vec<Vec<Vec<[i16; 64]>>>,
     frame_components: &Vec<FrameComponent>,
     quantization_tables: &Vec<QuantizationTable>,
-    max_vertical_factor: &u8,
-    max_horizontal_factor: &u8,
 ) -> Vec<Vec<Vec<[i16; 64]>>> {
     let mut dequantized_mcus: Vec<Vec<Vec<[i16; 64]>>> = Vec::new();
     for mcu in mcus.iter() {
         let mut dequantized_mcu: Vec<Vec<[i16; 64]>> = Vec::new();
         for fc in frame_components.iter() {
-            let total_component_blocks = fc.horizontal_sample_factor * fc.vertical_sample_factor;
-            if total_component_blocks == 0 {
-                continue;
-            }
             let mut dequantized_component: Vec<[i16; 64]> = Vec::new();
-            for _ in 0..max_horizontal_factor*max_vertical_factor {
-                dequantized_component.push([0; 64]);
-            }
             let qt: &QuantizationTable = &quantization_tables[fc.quantization_table_selector as usize];
-            for cb_y in 0..fc.vertical_sample_factor {
-                for cb_x in 0..fc.horizontal_sample_factor {
-                    // This indexing places blocks into the correct spot within the component
-                    let i: usize = (cb_y * max_horizontal_factor + cb_x) as usize;
-                    dequantized_component[i] = dequantize_block(&mcu[fc.id as usize - 1][i], qt);
-                }
+            let total_component_blocks: usize = (fc.horizontal_sample_factor * fc.vertical_sample_factor) as usize;
+            for i in 0..total_component_blocks {
+                dequantized_component.push(dequantize_block(&mcu[fc.id as usize - 1][i], qt));
             }
             dequantized_mcu.push(dequantized_component);
         }
@@ -1291,14 +1271,6 @@ fn upscale(
                     );
                 for (ub_idx, ub) in upscaled_blocks.iter().enumerate() {
                     let uc_idx: usize = b_idx + ub_idx * fc.vertical_sample_factor as usize;
-                    /*println!("component_id: {} | ub_idx: {} | uc_idx: {}", fc.id, ub_idx, uc_idx);
-                    for (sample_idx, sample) in ub.iter().enumerate() {
-                        if sample_idx % 8 == 0 && sample_idx != 0 {
-                            println!();
-                        }
-                        print!("{},\t", sample);
-                    }
-                    println!();*/
                     upscaled_component[uc_idx] = *ub;
                 }
                 b_idx += 1;
