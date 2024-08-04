@@ -798,6 +798,12 @@ fn main() {
                 &max_horizontal_factor,
                 &frame.frame_header.components
             );
+            mcus = upscale(
+                &mcus, 
+                &max_vertical_factor, 
+                &max_horizontal_factor,
+                &frame.frame_header.components
+            );
             mcus = 
                 ycbcr_to_rgb_mcu(
                     &mcus,
@@ -810,7 +816,6 @@ fn main() {
                     &max_vertical_factor, 
                     &max_horizontal_factor
                 );
-            
             // Construct the bmp image
             let image_size: usize = 
                 width as usize * 
@@ -1212,24 +1217,24 @@ fn upscale_block(
     for _ in 0..vertical_scaling_factor * horizontal_scaling_factor {
         upscaled.push([0; 64]);
     }
-    let width: usize = 8 / horizontal_scaling_factor;
-    let height: usize = 8 / vertical_scaling_factor;
-    for (idx, sample) in block.iter().enumerate() {
-        // sample x and y represent the coordinates of the block passed in
-        let sample_x: usize = idx % 8;
-        let sample_y: usize = idx / 8;
-        // b_idx chooses the block to copy the sample value into.
-        let b_idx: usize = ((sample_y / height) * horizontal_scaling_factor) + (sample_x / width);
-        // sb_idx chooses a sub block to replace all existing values with the sample value.
-        // A sub block is a group of samples defined by the dimensions vertical_scaling_factor by horizontal_scaling_factor
-        let sb_idx: usize = (((idx % width) * horizontal_scaling_factor) + (sample_y * vertical_scaling_factor * 8)) % 64;
-        for v in 0..vertical_scaling_factor {
-            for h in 0..horizontal_scaling_factor {
-                upscaled[b_idx][sb_idx + h + (v * 8)] = *sample;
+    for upscaled_y in 0..vertical_scaling_factor {
+        // The upscaled index refers to a sample's index across all blocks in the upscaled vector
+        let upscaled_y_idx = upscaled_y * 8;
+        for upscaled_x in 0..horizontal_scaling_factor {
+            let upscaled_x_idx = upscaled_x * 8;
+            for y in 0..8 {
+                for x in 0..8 {
+                    let upscaled_block_idx: usize = upscaled_y * horizontal_scaling_factor + upscaled_x;
+                    let upscaled_sample_idx: usize = y * 8 + x;
+                    let sample_y = (y + upscaled_y_idx) / vertical_scaling_factor;
+                    let sample_x = (x + upscaled_x_idx) / horizontal_scaling_factor;
+                    let sample_idx = sample_y * 8 + sample_x;
+                    upscaled[upscaled_block_idx][upscaled_sample_idx] = block[sample_idx];
+                }
             }
         }
     }
-    upscaled
+    return upscaled
 }
 
 fn upscale(
@@ -1287,6 +1292,14 @@ fn upscale(
                     );
                 for (ub_idx, ub) in upscaled_blocks.iter().enumerate() {
                     let uc_idx: usize = b_idx + ub_idx * fc.vertical_sample_factor as usize;
+                    /*println!("component_id: {} | ub_idx: {} | uc_idx: {}", fc.id, ub_idx, uc_idx);
+                    for (sample_idx, sample) in ub.iter().enumerate() {
+                        if sample_idx % 8 == 0 && sample_idx != 0 {
+                            println!();
+                        }
+                        print!("{},\t", sample);
+                    }
+                    println!();*/
                     upscaled_component[uc_idx] = *ub;
                 }
                 b_idx += 1;
