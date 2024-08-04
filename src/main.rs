@@ -486,7 +486,7 @@ enum ReadStage {
 
 fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
-    let path = "./src/images/guy.jpg";
+    let path = "./src/images/blocks.jpg";
     match std::fs::read(path) {
         Err(x) => panic!("path not found: {}", x),
         Ok(bytes) => {
