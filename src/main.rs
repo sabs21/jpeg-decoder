@@ -783,6 +783,8 @@ fn main() {
                 &mcus,
                 &frame.frame_header.components,
                 &frame.quantization_tables,
+                &max_vertical_factor,
+                &max_horizontal_factor
             );
             mcus = idct(&mcus);
             mcus = upscale(
@@ -896,6 +898,7 @@ impl BitReader {
     }
 }
 
+// DECODE: F.2.2.3, figure F.16 in itu-t81 spec
 fn next_symbol(bit_reader: &mut BitReader, hf: &HuffmanTable) -> Option<u8> {
     let mut code: u16 = bit_reader.next_bit().unwrap().into();
     let mut idx = 0;
@@ -908,8 +911,7 @@ fn next_symbol(bit_reader: &mut BitReader, hf: &HuffmanTable) -> Option<u8> {
         println!("Couldn't find symbol '{:16b}'", code);
         return None;
     }
-    let mut j: usize = hf.valptr[idx];
-    j = j + usize::try_from(code).unwrap() - usize::try_from(hf.mincode[idx]).unwrap();
+    let j: usize = hf.valptr[idx] + code as usize - hf.mincode[idx] as usize; 
     return Some(*hf.huffman_values.get(j).unwrap())
 }
 
@@ -1102,15 +1104,17 @@ fn dequantize(
     mcus: &Vec<Vec<Vec<[i16; 64]>>>,
     frame_components: &Vec<FrameComponent>,
     quantization_tables: &Vec<QuantizationTable>,
+    max_vertical_factor: &u8,
+    max_horizontal_factor: &u8
 ) -> Vec<Vec<Vec<[i16; 64]>>> {
     let mut dequantized_mcus: Vec<Vec<Vec<[i16; 64]>>> = Vec::new();
+    let mcu_size: usize = (max_horizontal_factor * max_vertical_factor) as usize;
     for mcu in mcus.iter() {
         let mut dequantized_mcu: Vec<Vec<[i16; 64]>> = Vec::new();
         for fc in frame_components.iter() {
             let mut dequantized_component: Vec<[i16; 64]> = Vec::new();
             let qt: &QuantizationTable = &quantization_tables[fc.quantization_table_selector as usize];
-            let total_component_blocks: usize = (fc.horizontal_sample_factor * fc.vertical_sample_factor) as usize;
-            for i in 0..total_component_blocks {
+            for i in 0..mcu_size {
                 dequantized_component.push(dequantize_block(&mcu[fc.id as usize - 1][i], qt));
             }
             dequantized_mcu.push(dequantized_component);
@@ -1314,12 +1318,12 @@ fn ycbcr_to_rgb_mcu(
         for mcu_idx in 0..total_mcus {
             for block_idx in 0..*mcu_size {
                 for pixel_idx in 0..64 {
-                    let y =  mcus[mcu_idx as usize][0][block_idx][pixel_idx];
-                    let cb = mcus[mcu_idx as usize][1][block_idx][pixel_idx];
-                    let cr = mcus[mcu_idx as usize][2][block_idx][pixel_idx];
-                    rgb_mcus[mcu_idx as usize][0][block_idx][pixel_idx] = ((y as f32 + 1.402 * cr as f32).round() as i16 + 128).max(0).min(255); 
-                    rgb_mcus[mcu_idx as usize][1][block_idx][pixel_idx] = ((y as f32 - (0.344 * cb as f32) - (0.714 * cr as f32)).round() as i16 + 128).max(0).min(255); 
-                    rgb_mcus[mcu_idx as usize][2][block_idx][pixel_idx] = ((y as f32 + 1.772 * cb as f32).round() as i16 + 128).max(0).min(255); 
+                    let y: f32 =  mcus[mcu_idx as usize][0][block_idx][pixel_idx] as f32;
+                    let cb: f32 = mcus[mcu_idx as usize][1][block_idx][pixel_idx] as f32;
+                    let cr: f32 = mcus[mcu_idx as usize][2][block_idx][pixel_idx] as f32;
+                    rgb_mcus[mcu_idx as usize][0][block_idx][pixel_idx] = ((y + 1.402 * cr).round() as i16 + 128).max(0).min(255); 
+                    rgb_mcus[mcu_idx as usize][1][block_idx][pixel_idx] = ((y - (0.344136 * cb) - (0.714136 * cr)).round() as i16 + 128).max(0).min(255); 
+                    rgb_mcus[mcu_idx as usize][2][block_idx][pixel_idx] = ((y + 1.772 * cb).round() as i16 + 128).max(0).min(255); 
                 }
             }
         }
