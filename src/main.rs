@@ -276,8 +276,18 @@ impl QuantizationTable {
             panic!("(QuantizationTable::build) (DQT) Byte data length does not correspond to length parameter");
         }
         self.precision_and_destination_id(&data[0]);
+        let zigzag: [usize; 64] = [
+            0,  1,  8,  16, 9,  2,  3,  10,
+            17, 24, 32, 25, 18, 11, 4,  5,
+            12, 19, 26, 33, 40, 48, 41, 34,
+            27, 20, 13, 6,  7,  14, 21, 28,
+            35, 42, 49, 56, 57, 50, 43, 36,
+            29, 22, 15, 23, 30, 37, 44, 51,
+            58, 59, 52, 45, 38, 31, 39, 46,
+            53, 60, 61, 54, 47, 55, 62, 63
+        ];
         for (idx, element) in data[1..].iter().enumerate() {
-            self.elements[idx] = *element;
+            self.elements[zigzag[idx]] = *element;
         }
     }
 }
@@ -486,7 +496,7 @@ enum ReadStage {
 
 fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
-    let path = "./src/images/lines.jpg";
+    let path = "./src/images/guy.jpg";
     match std::fs::read(path) {
         Err(x) => panic!("path not found: {}", x),
         Ok(bytes) => {
@@ -917,7 +927,7 @@ fn next_symbol(bit_reader: &mut BitReader, hf: &HuffmanTable) -> Option<u8> {
 
 fn decode_block(
     scan_component: &ScanComponent,
-    prev_dc: &i16,
+    prev_dc: &mut i16,
     bit_reader: &mut BitReader,
     dc: &HuffmanTable,
     ac: &HuffmanTable,
@@ -941,7 +951,8 @@ fn decode_block(
         dc_coeff -= (1 << dc_coeff_length) - 1;
     }
     // We add the previous dc value here, refered to as the predictor.
-    data_block[0] = dc_coeff + prev_dc;
+    data_block[0] = dc_coeff + *prev_dc;
+    *prev_dc = data_block[0];
     let mut ac_counter: usize = 1;
     while ac_counter < 64 {
         let ac_symbol = 
@@ -1032,13 +1043,12 @@ fn decode_huffman_to_blocks(
                 for _ in 0..blocks_per_component[cid] {
                     let block = decode_block(
                             sc,
-                            &prev_dc[cid],
+                            &mut prev_dc[cid],
                             &mut bit_reader,
                             &frame.dc_huffman_tables.get(sc.dc_entropy_table_dest as usize).unwrap(),
                             &frame.ac_huffman_tables.get(sc.ac_entropy_table_dest as usize).unwrap(),
                             &zigzag
                         );
-                    prev_dc[cid] = block[0];
                     blocks.push(block);
                 }
             }
