@@ -496,7 +496,7 @@ enum ReadStage {
 
 fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
-    let path = "./src/images/guy.jpg";
+    let path = "./src/images/cat.jpg";
     match std::fs::read(path) {
         Err(x) => panic!("path not found: {}", x),
         Ok(bytes) => {
@@ -1137,12 +1137,25 @@ fn dequantize(
 // Inverse Discrete Cosine Transform (aka DCTIII)
 fn idct(mcus: &Vec<Vec<Vec<[i16; 64]>>>) -> Vec<Vec<Vec<[i16; 64]>>> {
     let mut shifted_mcus: Vec<Vec<Vec<[i16; 64]>>> = Vec::new();
+    let mut cos_table: [[f64; 8]; 8] = [[0.0; 8]; 8];
+    // precompute cosine calculations
+    for i in 0..8 {
+        for j in 0..8 {
+            cos_table[i][j] = 
+                (
+                    (2.0 * i as f64 + 1.0)
+                    * j as f64
+                    * std::f64::consts::PI
+                    / 16.0
+                ).cos();
+        }
+    }
     for mcu in mcus.iter() {
         let mut shifted_mcu: Vec<Vec<[i16; 64]>> = Vec::new();
         for component in mcu.iter() {
             let mut shifted_component: Vec<[i16; 64]> = Vec::new();
             for block in component.iter() {
-                shifted_component.push(idct_block(block));
+                shifted_component.push(idct_block(block, &cos_table));
             }
             shifted_mcu.push(shifted_component);
         }
@@ -1151,7 +1164,7 @@ fn idct(mcus: &Vec<Vec<Vec<[i16; 64]>>>) -> Vec<Vec<Vec<[i16; 64]>>> {
     return shifted_mcus
 }
 
-fn idct_block(block: &[i16; 64]) -> [i16; 64] {
+fn idct_block(block: &[i16; 64], cos_table: &[[f64; 8]; 8]) -> [i16; 64] {
     let mut shifted_block: [i16; 64] = [0; 64];
     let inverse_sqrt_two: f64 = 1_f64 / 2_f64.sqrt();
     for y in 0..8 {
@@ -1170,18 +1183,8 @@ fn idct_block(block: &[i16; 64]) -> [i16; 64] {
                     sum += cu 
                         * cv 
                         * block[v * 8 + u] as f64
-                        * (
-                            (2.0 * x as f64 + 1.0)
-                            * u as f64
-                            * std::f64::consts::PI
-                            / 16.0
-                        ).cos()
-                        * (
-                            (2.0 * y as f64 + 1.0)
-                            * v as f64
-                            * std::f64::consts::PI
-                            / 16.0
-                        ).cos();
+                        * cos_table[x][u]
+                        * cos_table[y][v];
                 }
             }
             sum /= 4.0;
