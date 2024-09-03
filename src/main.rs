@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io::Write;
-use std::path::PathBuf;
 use clap::Parser;
 
 #[non_exhaustive]
@@ -501,7 +500,10 @@ enum ReadStage {
 struct Cli {
     // Input JPEG file
     #[arg(short, long, value_name = "FILE")]
-    input: Option<std::path::PathBuf> 
+    input: Option<std::path::PathBuf>,
+    // Output BMP file
+    #[arg(short, long, value_name = "FILE", default_value = default_output_path().into_os_string())]
+    output: std::path::PathBuf
 }
 
 fn main() {
@@ -515,7 +517,7 @@ fn main() {
             .extension()
             .expect("Missing file extension for input image.")
             .to_str()
-            .expect("Path contains a non UTF-8 character. Unable to parse path.");
+            .expect("Input image path contains a non UTF-8 character. Unable to parse path.");
     if file_extension != "jpg" && file_extension != "jpeg" {
         panic!("Expected JPEG file as input. Received {} instead.", file_extension);
     }
@@ -861,17 +863,39 @@ fn main() {
                     &max_horizontal_factor, 
                     &frame.frame_header.components
                 );
-            let path = std::path::Path::new("C:/Users/Nick/projects/jpeg-decode/src/images/output.bmp");
+            
+            let mut output_path = cli.output;//std::path::Path::new("C:/Users/Nick/projects/jpeg-decode/src/images/output.bmp");
+            //let output_ext = output_path.extension().unwrap_or("").to_str();
+            let output_ext = 
+                output_path
+                    .extension()
+                    .unwrap_or(std::ffi::OsStr::new(""))
+                    .to_str();
+            match output_ext {
+                Some(ext) => {
+                    if ext != "bmp" {
+                        println!("Added 'bmp' extension to output path.");
+                        output_path = output_path.with_extension("bmp");
+                    }
+                },
+                None => println!("Output image path contains a non UTF-8 character. Unable to parse path. Using default output path instead.")
+            }
             create_bmp(
-                &path, 
+                &output_path, 
                 &bmp_data, 
                 &(width as usize), 
                 &(height as usize), 
                 &frame.frame_header.total_components
             );
-            println!("Bitmap output created at: {}", path.as_os_str().to_str().unwrap());
+            println!("Bitmap output created at: {}", output_path.to_str().unwrap());
         }
     }
+}
+
+fn default_output_path() -> std::path::PathBuf {
+    let mut path = std::env::current_dir().unwrap();
+    path.push("output.bmp");
+    return path;
 }
 
 // Allows reading data bit by bit (as opposed to byte by byte)
