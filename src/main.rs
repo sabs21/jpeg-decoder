@@ -1,5 +1,7 @@
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
+use clap::Parser;
 
 #[non_exhaustive]
 struct Markers;
@@ -494,12 +496,35 @@ enum ReadStage {
     Scan
 }
 
+#[derive(clap::Parser)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    // Input JPEG file
+    #[arg(short, long, value_name = "FILE")]
+    input: Option<std::path::PathBuf> 
+}
+
 fn main() {
-    let path = "./src/images/cat.jpg";
-    match std::fs::read(path) {
+    // Allow the user to input their own image
+    let cli = Cli::parse();
+    let image_path = cli.input.as_deref().expect("Missing input JPEG image.");
+    
+    // Verify that the file supplied has a jpeg file extension
+    let file_extension = 
+        image_path 
+            .extension()
+            .expect("Missing file extension for input image.")
+            .to_str()
+            .expect("Path contains a non UTF-8 character. Unable to parse path.");
+    if file_extension != "jpg" && file_extension != "jpeg" {
+        panic!("Expected JPEG file as input. Received {} instead.", file_extension);
+    }
+    
+    // Read the image from the supplied path
+    match std::fs::read(image_path) {
         Err(x) => panic!("path not found: {}", x),
         Ok(bytes) => {
-            println!("Scanning in {}...", path.to_string());
+            println!("Scanning in {:?}...", image_path.to_str());
             let mut stage = ReadStage::Marker;
             let mut current_marker_bytes: [Option<u8>; 2] = [None;2]; // Identify segment to construct based on marker
             let mut segment_length_bytes: [Option<u8>; 2] = [None;2]; // Used for bounds checking
