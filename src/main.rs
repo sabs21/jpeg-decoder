@@ -822,7 +822,25 @@ fn main() {
                 &max_vertical_factor,
                 &max_horizontal_factor
             );
-            mcus = idct(&mcus);
+            // IDCT Scaling
+            let mut m_factors: [f32; 6] = [0.0; 6];
+            m_factors[0] = 2.0 * f32::cos(1.0 / 16.0 * 2.0 * std::f32::consts::PI);
+            m_factors[1] = 2.0 * f32::cos(2.0 / 16.0 * 2.0 * std::f32::consts::PI);
+            m_factors[3] = 2.0 * f32::cos(2.0 / 16.0 * 2.0 * std::f32::consts::PI);
+            m_factors[5] = 2.0 * f32::cos(3.0 / 16.0 * 2.0 * std::f32::consts::PI);
+            m_factors[2] = m_factors[0] - m_factors[5];
+            m_factors[4] = m_factors[0] + m_factors[5];
+            let mut scale_factors: [f32; 8] = [0_f32; 8];
+            scale_factors[0] = f32::cos(0.0 / 16.0 * std::f32::consts::PI) / f32::sqrt(8.0); 
+            scale_factors[1] = f32::cos(1.0 / 16.0 * std::f32::consts::PI) / 2.0; 
+            scale_factors[2] = f32::cos(2.0 / 16.0 * std::f32::consts::PI) / 2.0; 
+            scale_factors[3] = f32::cos(3.0 / 16.0 * std::f32::consts::PI) / 2.0;
+            scale_factors[4] = f32::cos(4.0 / 16.0 * std::f32::consts::PI) / 2.0; 
+            scale_factors[5] = f32::cos(5.0 / 16.0 * std::f32::consts::PI) / 2.0; 
+            scale_factors[6] = f32::cos(6.0 / 16.0 * std::f32::consts::PI) / 2.0; 
+            scale_factors[7] = f32::cos(7.0 / 16.0 * std::f32::consts::PI) / 2.0; 
+            mcus = aan_idct(&mcus, &m_factors, &scale_factors);
+            //mcus = idct(&mcus);
             mcus = upscale(
                 &mcus, 
                 &max_vertical_factor, 
@@ -1180,6 +1198,143 @@ fn dequantize(
         dequantized_mcus.push(dequantized_mcu);
     }
     return dequantized_mcus;
+}
+
+// AAN version of the IDCT algorithm
+fn aan_idct(mcus: &Vec<Vec<Vec<[i16; 64]>>>, m_factors: &[f32; 6], scale_factors: &[f32; 8]) -> Vec<Vec<Vec<[i16; 64]>>> {
+    let mut shifted_mcus: Vec<Vec<Vec<[i16; 64]>>> = Vec::new();
+    for mcu in mcus.iter() {
+        let mut shifted_mcu: Vec<Vec<[i16; 64]>> = Vec::new();
+        for component in mcu.iter() {
+            let mut shifted_component: Vec<[i16; 64]> = Vec::new();
+            for block in component.iter() {
+                shifted_component.push(aan_idct_block(block, m_factors, scale_factors));
+            }
+            shifted_mcu.push(shifted_component);
+        }
+        shifted_mcus.push(shifted_mcu);
+    }
+    return shifted_mcus
+}
+
+fn aan_1d_transform(values: &[f32; 8], m_factors: &[f32; 6]) -> [f32; 8] {
+    let mut out: [f32; 8] = [0.0; 8];
+    
+    let g0 = values[0];
+    let g1 = values[1];
+    let g2 = values[2];
+    let g3 = values[3];
+    let g4 = values[4];
+    let g5 = values[5];
+    let g6 = values[6];
+    let g7 = values[7];
+
+    let f0 = g0;
+    let f1 = g1;
+    let f2 = g2;
+    let f3 = g3;
+    let f4 = g4 - g7;
+    let f5 = g5 + g6;
+    let f6 = g5 - g6;
+    let f7 = g4 + g7;
+
+    let e0 = f0;
+    let e1 = f1;
+    let e2 = f2 - f3;
+    let e3 = f2 + f3;
+    let e4 = f4;
+    let e5 = f5 - f7;
+    let e6 = f6;
+    let e7 = f5 + f7;
+    let e8 = f4 + f6;
+    
+    let d0 = e0;
+    let d1 = e1;
+    let d2 = e2 * m_factors[1];
+    let d3 = e3;
+    let d4 = e4 * m_factors[2];
+    let d5 = e5 * m_factors[3];
+    let d6 = e6 * m_factors[4];
+    let d7 = e7;
+    let d8 = e8 * m_factors[5];
+    
+    let c0 = d0 + d1;
+    let c1 = d0 - d1;
+    let c2 = d2 - d3;
+    let c3 = d3;
+    let c4 = d4 + d8;
+    let c5 = d5 + d7;
+    let c6 = d6 - d8;
+    let c7 = d7;
+    let c8 = c5 - c6;
+
+    let b0 = c0 + c3;
+    let b1 = c1 + c2;
+    let b2 = c1 - c2;
+    let b3 = c0 - c3;
+    let b4 = c4 - c8;
+    let b5 = c8;
+    let b6 = c6 - c7;
+    let b7 = c7;
+
+    out[0] = b0 + b7;
+    out[1] = b1 + b6;
+    out[2] = b2 + b5;
+    out[3] = b3 + b4;
+    out[4] = b3 - b4;
+    out[5] = b2 - b5;
+    out[6] = b1 - b6;
+    out[7] = b0 - b7;
+
+    return out
+}
+
+// 1D IDCT to 2D IDCT
+fn aan_idct_block(block: &[i16; 64], m_factors: &[f32; 6], scale_factors: &[f32; 8]) -> [i16; 64] {
+    let mut out_block: [f32; 64] = [0.0; 64];
+    for i in 0..8 {
+        // calculate IDCT for each column
+        let mut col: [f32; 8] = [0.0; 8];
+        col[0] = block[0 * 8 + i] as f32 * scale_factors[0];
+        col[1] = block[4 * 8 + i] as f32 * scale_factors[4]; 
+        col[2] = block[2 * 8 + i] as f32 * scale_factors[2];
+        col[3] = block[6 * 8 + i] as f32 * scale_factors[6];
+        col[4] = block[5 * 8 + i] as f32 * scale_factors[5];
+        col[5] = block[1 * 8 + i] as f32 * scale_factors[1];
+        col[6] = block[7 * 8 + i] as f32 * scale_factors[7];
+        col[7] = block[3 * 8 + i] as f32 * scale_factors[3];
+        col = aan_1d_transform(&col, m_factors);
+        out_block[0 * 8 + i] = col[0] as f32;
+        out_block[1 * 8 + i] = col[1] as f32;
+        out_block[2 * 8 + i] = col[2] as f32;
+        out_block[3 * 8 + i] = col[3] as f32;
+        out_block[4 * 8 + i] = col[4] as f32;
+        out_block[5 * 8 + i] = col[5] as f32;
+        out_block[6 * 8 + i] = col[6] as f32;
+        out_block[7 * 8 + i] = col[7] as f32;
+    }
+    for i in 0..8 {
+        // calculate IDCT for each row
+        let mut row: [f32; 8] = [0.0; 8];
+        row[0] = out_block[i * 8 + 0] as f32 * scale_factors[0];
+        row[1] = out_block[i * 8 + 4] as f32 * scale_factors[4];
+        row[2] = out_block[i * 8 + 2] as f32 * scale_factors[2];
+        row[3] = out_block[i * 8 + 6] as f32 * scale_factors[6];
+        row[4] = out_block[i * 8 + 5] as f32 * scale_factors[5];
+        row[5] = out_block[i * 8 + 1] as f32 * scale_factors[1];
+        row[6] = out_block[i * 8 + 7] as f32 * scale_factors[7];
+        row[7] = out_block[i * 8 + 3] as f32 * scale_factors[3];
+        row = aan_1d_transform(&row, m_factors);
+        out_block[i * 8 + 0] = row[0];
+        out_block[i * 8 + 1] = row[1];
+        out_block[i * 8 + 2] = row[2];
+        out_block[i * 8 + 3] = row[3];
+        out_block[i * 8 + 4] = row[4];
+        out_block[i * 8 + 5] = row[5];
+        out_block[i * 8 + 6] = row[6];
+        out_block[i * 8 + 7] = row[7];
+    }
+    return out_block.map(|i| i as i16)
 }
 
 // Inverse Discrete Cosine Transform (aka DCTIII)
